@@ -39,7 +39,9 @@
       mapping: {}
     },
     pendingDelete: null,
-    editingRecordId: null
+    editingRecordId: null,
+    collapsedDivisions: new Set(),
+    collapsedRanges: new Set()
   };
 
   // Table Configuration Metadata
@@ -436,6 +438,50 @@
     if (el.terminalClearBtn) el.terminalClearBtn.addEventListener('click', () => {
       if (el.pipelineTerminalConsole) el.pipelineTerminalConsole.innerHTML = '';
     });
+
+    // Jurisdiction Management Events
+    const btnCollapseAll = document.getElementById('btn-collapse-all');
+    if (btnCollapseAll) btnCollapseAll.addEventListener('click', collapseAll);
+    const btnExpandAll = document.getElementById('btn-expand-all');
+    if (btnExpandAll) btnExpandAll.addEventListener('click', expandAll);
+
+    const btnAddDiv = document.getElementById('btn-add-division');
+    if (btnAddDiv) btnAddDiv.addEventListener('click', () => openJurisdictionModal('division'));
+    const btnAddRng = document.getElementById('btn-add-range');
+    if (btnAddRng) btnAddRng.addEventListener('click', () => openJurisdictionModal('range'));
+    const btnAddBt = document.getElementById('btn-add-beat');
+    if (btnAddBt) btnAddBt.addEventListener('click', () => openJurisdictionModal('beat'));
+    const btnUploadBnd = document.getElementById('btn-upload-boundary');
+    if (btnUploadBnd) btnUploadBnd.addEventListener('click', () => openBoundaryUploadModal('beat'));
+    const jClose = document.getElementById('jurisdiction-modal-close-btn');
+    if (jClose) jClose.addEventListener('click', closeJurisdictionModal);
+    const jCancel = document.getElementById('jurisdiction-modal-cancel-btn');
+    if (jCancel) jCancel.addEventListener('click', closeJurisdictionModal);
+    const jForm = document.getElementById('jurisdiction-form');
+    if (jForm) jForm.addEventListener('submit', handleSaveJurisdiction);
+    const bClose = document.getElementById('boundary-upload-close-btn');
+    if (bClose) bClose.addEventListener('click', closeBoundaryUploadModal);
+    const bCancel = document.getElementById('boundary-upload-cancel-btn');
+    if (bCancel) bCancel.addEventListener('click', closeBoundaryUploadModal);
+    const bForm = document.getElementById('boundary-upload-form');
+    if (bForm) bForm.addEventListener('submit', handleUploadBoundary);
+
+    const mClose = document.getElementById('move-modal-close-btn');
+    if (mClose) mClose.addEventListener('click', closeMoveJurisdictionModal);
+    const mCancel = document.getElementById('move-modal-cancel-btn');
+    if (mCancel) mCancel.addEventListener('click', closeMoveJurisdictionModal);
+    const mForm = document.getElementById('move-jurisdiction-form');
+    if (mForm) mForm.addEventListener('submit', handleConfirmMove);
+
+    // User Management Events
+    const btnAddUser = document.getElementById('btn-add-user');
+    if (btnAddUser) btnAddUser.addEventListener('click', () => openUserModal());
+    const uClose = document.getElementById('user-modal-close-btn');
+    if (uClose) uClose.addEventListener('click', closeUserModal);
+    const uCancel = document.getElementById('user-modal-cancel-btn');
+    if (uCancel) uCancel.addEventListener('click', closeUserModal);
+    const uForm = document.getElementById('user-form');
+    if (uForm) uForm.addEventListener('submit', handleSaveUser);
   }
 
   // Toast Notifications
@@ -569,6 +615,10 @@
 
       if (tabName === 'dashboard') {
         loadDashboardStats();
+      } else if (tabName === 'jurisdictions') {
+        loadJurisdictionTree();
+      } else if (tabName === 'users') {
+        loadUsersTable();
       }
     }
   }
@@ -1970,6 +2020,13 @@
     fd.append('mode', mode);
     fd.append('mapping_json', mappingJson);
 
+    const divScope = document.getElementById('upload-scope-division');
+    const rngScope = document.getElementById('upload-scope-range');
+    const beatScope = document.getElementById('upload-scope-beat');
+    if (divScope && divScope.value) fd.append('division_name', divScope.value);
+    if (rngScope && rngScope.value) fd.append('range_name', rngScope.value);
+    if (beatScope && beatScope.value) fd.append('beat_name', beatScope.value);
+
     try {
       pipelineController.setStage(0, 'completed', `Field bindings verified for '${targetTable}'`);
       pipelineController.setStage(1, 'active', 'Transforming records and converting numerals...');
@@ -2061,5 +2118,761 @@
       showToast('Error clearing cache', 'error');
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Jurisdiction Hierarchy Management (Pillar 1)
+  // ---------------------------------------------------------------------------
+  function escapeHtml(str) {
+    return escapeAttr(str);
+  }
+
+  function toggleCollapse(level, id) {
+    if (level === 'division') {
+      if (state.collapsedDivisions.has(id)) {
+        state.collapsedDivisions.delete(id);
+      } else {
+        state.collapsedDivisions.add(id);
+      }
+    } else if (level === 'range') {
+      if (state.collapsedRanges.has(id)) {
+        state.collapsedRanges.delete(id);
+      } else {
+        state.collapsedRanges.add(id);
+      }
+    }
+    loadJurisdictionTree();
+  }
+
+  function collapseAll() {
+    (state.cachedDivisions || []).forEach(d => state.collapsedDivisions.add(d.id));
+    (state.cachedRanges || []).forEach(r => state.collapsedRanges.add(r.id));
+    loadJurisdictionTree();
+  }
+
+  function expandAll() {
+    state.collapsedDivisions.clear();
+    state.collapsedRanges.clear();
+    loadJurisdictionTree();
+  }
+
+  async function loadJurisdictionTree() {
+    const tbody = document.getElementById('jurisdiction-tree-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4">Loading administrative hierarchy...</td></tr>';
+
+    try {
+      const [divRes, rngRes, btRes] = await Promise.all([
+        fetch('/api/admin/jurisdictions/divisions', { headers: getAuthHeaders() }),
+        fetch('/api/admin/jurisdictions/ranges', { headers: getAuthHeaders() }),
+        fetch('/api/admin/jurisdictions/beats', { headers: getAuthHeaders() })
+      ]);
+
+      const divisions = divRes.ok ? await divRes.json() : [];
+      const ranges = rngRes.ok ? await rngRes.json() : [];
+      const beats = btRes.ok ? await btRes.json() : [];
+
+      state.cachedDivisions = divisions;
+      state.cachedRanges = ranges;
+      state.cachedBeats = beats;
+
+      syncUploadScopeDropdowns(divisions, ranges, beats);
+
+      if (!divisions.length && !ranges.length && !beats.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No jurisdictions defined yet. Click "Add Division" to start.</td></tr>';
+        return;
+      }
+
+      let rowsHtml = '';
+      divisions.forEach(div => {
+        const divRanges = ranges.filter(r => (r.division_name || '').toLowerCase() === (div.name || '').toLowerCase());
+        const totalAcre = div.area_acre ? Number(div.area_acre).toLocaleString(undefined, {minimumFractionDigits: 2}) : '-';
+        const isDivCollapsed = state.collapsedDivisions.has(div.id);
+        const divToggleIcon = isDivCollapsed ? '▶' : '▼';
+
+        rowsHtml += `
+          <tr style="background-color: var(--bg-surface-variant, rgba(0,0,0,0.03)); font-weight: 600;">
+            <td>
+              <button class="btn btn-outline btn-xs" style="padding: 2px 6px; margin-right: 6px; cursor: pointer;" onclick="window.AdminApp.toggleCollapse('division', ${div.id})" title="${isDivCollapsed ? 'Expand Division' : 'Collapse Division'}">${divToggleIcon}</button>
+              <span class="badge badge-primary">Division</span>
+            </td>
+            <td><strong>${escapeHtml(div.name)}</strong></td>
+            <td>${escapeHtml(div.bengali_name || '-')}</td>
+            <td><em>National (BD)</em></td>
+            <td>${totalAcre}</td>
+            <td><span class="badge badge-success">Active</span></td>
+            <td class="text-right">
+              <button class="btn btn-outline btn-xs" onclick="window.AdminApp.openJurisdictionModal('range', '${escapeHtml(div.name)}')">+ Range</button>
+              <button class="btn btn-secondary btn-xs ml-1" onclick="window.AdminApp.openEditJurisdictionModal('division', ${div.id})">Edit</button>
+              <button class="btn btn-danger btn-xs ml-1" onclick="window.AdminApp.deleteJurisdiction('division', ${div.id}, '${escapeHtml(div.name)}')">Delete</button>
+            </td>
+          </tr>
+        `;
+
+        divRanges.forEach(rng => {
+          const rngBeats = beats.filter(b => (b.range_name || '').toLowerCase() === (rng.name || '').toLowerCase());
+          const rngAcre = rng.area_acre ? Number(rng.area_acre).toLocaleString(undefined, {minimumFractionDigits: 2}) : '-';
+          const isRngCollapsed = state.collapsedRanges.has(rng.id);
+          const rngToggleIcon = isRngCollapsed ? '▶' : '▼';
+          const rngRowDisplay = isDivCollapsed ? 'display: none;' : '';
+
+          rowsHtml += `
+            <tr style="background-color: var(--bg-surface, #fff); ${rngRowDisplay}">
+              <td>
+                <span style="margin-left: 16px; color: var(--text-muted);">↳</span>
+                <button class="btn btn-outline btn-xs" style="padding: 2px 6px; margin-right: 4px; margin-left: 4px; cursor: pointer;" onclick="window.AdminApp.toggleCollapse('range', ${rng.id})" title="${isRngCollapsed ? 'Expand Range' : 'Collapse Range'}">${rngToggleIcon}</button>
+                <span class="badge badge-info">Range</span>
+              </td>
+              <td style="padding-left: 20px;"><strong>${escapeHtml(rng.name)}</strong></td>
+              <td>${escapeHtml(rng.bengali_name || '-')}</td>
+              <td>${escapeHtml(div.name)}</td>
+              <td>${rngAcre}</td>
+              <td><span class="badge badge-success">${rngBeats.length} Beats</span></td>
+              <td class="text-right">
+                <button class="btn btn-outline btn-xs" onclick="window.AdminApp.openJurisdictionModal('beat', '${escapeHtml(rng.name)}')">+ Beat</button>
+                <button class="btn btn-secondary btn-xs ml-1" onclick="window.AdminApp.openBoundaryUploadModal('range', '${escapeHtml(rng.name)}')">Boundary</button>
+                <button class="btn btn-secondary btn-xs ml-1" onclick="window.AdminApp.openEditJurisdictionModal('range', ${rng.id})">Edit</button>
+                <button class="btn btn-outline btn-xs ml-1" onclick="window.AdminApp.openMoveJurisdictionModal('range', ${rng.id}, '${escapeHtml(rng.name)}', '${escapeHtml(div.name)}')">Move</button>
+                <button class="btn btn-danger btn-xs ml-1" onclick="window.AdminApp.deleteJurisdiction('range', ${rng.id}, '${escapeHtml(rng.name)}')">Delete</button>
+              </td>
+            </tr>
+          `;
+
+          rngBeats.forEach(bt => {
+            const btAcre = bt.area_acre ? Number(bt.area_acre).toLocaleString(undefined, {minimumFractionDigits: 2}) : '-';
+            const beatRowDisplay = (isDivCollapsed || isRngCollapsed) ? 'display: none;' : '';
+
+            rowsHtml += `
+              <tr style="${beatRowDisplay}">
+                <td>
+                  <span style="margin-left: 36px; color: var(--text-muted);">↳↳</span>
+                  <span class="badge badge-secondary" style="margin-left: 8px;">Beat</span>
+                </td>
+                <td style="padding-left: 40px;">${escapeHtml(bt.name)}</td>
+                <td>${escapeHtml(bt.bengali_name || '-')}</td>
+                <td>${escapeHtml(rng.name)}</td>
+                <td>${btAcre}</td>
+                <td><span class="badge badge-outline">Ready</span></td>
+                <td class="text-right">
+                  <button class="btn btn-primary btn-xs" onclick="window.AdminApp.openBoundaryUploadModal('beat', '${escapeHtml(bt.name)}')">Boundary</button>
+                  <button class="btn btn-secondary btn-xs ml-1" onclick="window.AdminApp.openEditJurisdictionModal('beat', ${bt.id})">Edit</button>
+                  <button class="btn btn-outline btn-xs ml-1" onclick="window.AdminApp.openMoveJurisdictionModal('beat', ${bt.id}, '${escapeHtml(bt.name)}', '${escapeHtml(rng.name)}')">Move</button>
+                  <button class="btn btn-danger btn-xs ml-1" onclick="window.AdminApp.deleteJurisdiction('beat', ${bt.id}, '${escapeHtml(bt.name)}')">Delete</button>
+                </td>
+              </tr>
+            `;
+          });
+        });
+      });
+
+      tbody.innerHTML = rowsHtml;
+    } catch (e) {
+      console.error('loadJurisdictionTree error:', e);
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger">Failed to load jurisdictions: ' + escapeHtml(e.message) + '</td></tr>';
+    }
+  }
+
+  function syncUploadScopeDropdowns(divisions, ranges, beats) {
+    const divSelect = document.getElementById('upload-scope-division');
+    const rngSelect = document.getElementById('upload-scope-range');
+    const btSelect = document.getElementById('upload-scope-beat');
+    if (!divSelect || !rngSelect || !btSelect) return;
+
+    divSelect.innerHTML = (divisions || []).map(d => `<option value="${escapeHtml(d.name)}">${escapeHtml(d.name)}</option>`).join('');
+
+    const currentRng = rngSelect.value;
+    rngSelect.innerHTML = '<option value="">-- Select Range (Optional) --</option>' +
+      (ranges || []).map(r => `<option value="${escapeHtml(r.name)}" ${r.name === currentRng ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+
+    const currentBt = btSelect.value;
+    btSelect.innerHTML = '<option value="">-- Select Beat (Optional) --</option>' +
+      (beats || []).map(b => `<option value="${escapeHtml(b.name)}" ${b.name === currentBt ? 'selected' : ''}>${escapeHtml(b.name)}</option>`).join('');
+  }
+
+  function openJurisdictionModal(level = 'division', parentName = '') {
+    const modal = document.getElementById('jurisdiction-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('jurisdiction-modal-title');
+    const levelInput = document.getElementById('jurisdiction-unit-level');
+    const idInput = document.getElementById('jurisdiction-unit-id');
+    const parentGroup = document.getElementById('jurisdiction-parent-group');
+    const parentLabel = document.getElementById('jurisdiction-parent-label');
+    const parentSelect = document.getElementById('jurisdiction-parent-select');
+    const nameEn = document.getElementById('jurisdiction-name-en');
+    const nameBn = document.getElementById('jurisdiction-name-bn');
+    const areaAcre = document.getElementById('jurisdiction-area-acre');
+    const coordsGroup = document.getElementById('jurisdiction-center-coords');
+    const latInput = document.getElementById('jurisdiction-center-lat');
+    const lngInput = document.getElementById('jurisdiction-center-lng');
+    const saveBtn = document.getElementById('jurisdiction-modal-save-btn');
+
+    levelInput.value = level;
+    if (idInput) idInput.value = '';
+    if (nameEn) nameEn.value = '';
+    if (nameBn) nameBn.value = '';
+    if (areaAcre) areaAcre.value = '';
+    if (latInput) latInput.value = '';
+    if (lngInput) lngInput.value = '';
+    if (saveBtn) saveBtn.textContent = 'Save Jurisdiction';
+
+    if (level === 'division') {
+      if (titleEl) titleEl.textContent = 'Add New Forest Division';
+      if (parentGroup) parentGroup.style.display = 'none';
+      if (coordsGroup) coordsGroup.style.display = 'none';
+    } else if (level === 'range') {
+      if (titleEl) titleEl.textContent = 'Add New Range';
+      if (parentGroup) {
+        parentGroup.style.display = 'block';
+        if (parentLabel) parentLabel.textContent = 'Parent Forest Division';
+        const divisions = state.cachedDivisions && state.cachedDivisions.length ? state.cachedDivisions : [
+          { name: 'Biodiversity Conservation Division' }
+        ];
+        parentSelect.innerHTML = divisions.map(d => `<option value="${escapeHtml(d.name)}" ${d.name === parentName ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+      }
+      if (coordsGroup) coordsGroup.style.display = 'none';
+    } else if (level === 'beat') {
+      if (titleEl) titleEl.textContent = 'Add New Beat';
+      if (parentGroup) {
+        parentGroup.style.display = 'block';
+        if (parentLabel) parentLabel.textContent = 'Parent Range';
+        const ranges = state.cachedRanges && state.cachedRanges.length ? state.cachedRanges : [
+          { name: 'National Park Range' },
+          { name: 'Bhawal Range' }
+        ];
+        parentSelect.innerHTML = ranges.map(r => `<option value="${escapeHtml(r.name)}" ${r.name === parentName ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+      }
+      if (coordsGroup) coordsGroup.style.display = 'flex';
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  function openEditJurisdictionModal(level, id) {
+    const modal = document.getElementById('jurisdiction-modal');
+    if (!modal) return;
+
+    let item = null;
+    if (level === 'division') {
+      item = (state.cachedDivisions || []).find(d => d.id === id);
+    } else if (level === 'range') {
+      item = (state.cachedRanges || []).find(r => r.id === id);
+    } else if (level === 'beat') {
+      item = (state.cachedBeats || []).find(b => b.id === id);
+    }
+
+    if (!item) {
+      showToast('Jurisdiction item not found', 'error');
+      return;
+    }
+
+    const titleEl = document.getElementById('jurisdiction-modal-title');
+    const levelInput = document.getElementById('jurisdiction-unit-level');
+    const idInput = document.getElementById('jurisdiction-unit-id');
+    const parentGroup = document.getElementById('jurisdiction-parent-group');
+    const parentLabel = document.getElementById('jurisdiction-parent-label');
+    const parentSelect = document.getElementById('jurisdiction-parent-select');
+    const nameEn = document.getElementById('jurisdiction-name-en');
+    const nameBn = document.getElementById('jurisdiction-name-bn');
+    const areaAcre = document.getElementById('jurisdiction-area-acre');
+    const coordsGroup = document.getElementById('jurisdiction-center-coords');
+    const latInput = document.getElementById('jurisdiction-center-lat');
+    const lngInput = document.getElementById('jurisdiction-center-lng');
+    const saveBtn = document.getElementById('jurisdiction-modal-save-btn');
+
+    levelInput.value = level;
+    idInput.value = id;
+    if (nameEn) nameEn.value = item.name || '';
+    if (nameBn) nameBn.value = item.bengali_name || '';
+    if (areaAcre) areaAcre.value = item.area_acre || '';
+
+    if (titleEl) titleEl.textContent = `Edit ${level.charAt(0).toUpperCase() + level.slice(1)}: ${item.name}`;
+    if (saveBtn) saveBtn.textContent = `Update ${level.charAt(0).toUpperCase() + level.slice(1)}`;
+
+    if (level === 'division') {
+      if (parentGroup) parentGroup.style.display = 'none';
+      if (coordsGroup) coordsGroup.style.display = 'none';
+    } else if (level === 'range') {
+      if (parentGroup) {
+        parentGroup.style.display = 'block';
+        if (parentLabel) parentLabel.textContent = 'Parent Forest Division';
+        const divisions = state.cachedDivisions && state.cachedDivisions.length ? state.cachedDivisions : [
+          { name: 'Biodiversity Conservation Division' }
+        ];
+        parentSelect.innerHTML = divisions.map(d => `<option value="${escapeHtml(d.name)}" ${d.name === item.division_name ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+      }
+      if (coordsGroup) coordsGroup.style.display = 'none';
+    } else if (level === 'beat') {
+      if (parentGroup) {
+        parentGroup.style.display = 'block';
+        if (parentLabel) parentLabel.textContent = 'Parent Range';
+        const ranges = state.cachedRanges && state.cachedRanges.length ? state.cachedRanges : [
+          { name: 'National Park Range' },
+          { name: 'Bhawal Range' }
+        ];
+        parentSelect.innerHTML = ranges.map(r => `<option value="${escapeHtml(r.name)}" ${r.name === item.range_name ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+      }
+      if (coordsGroup) coordsGroup.style.display = 'flex';
+      if (latInput) latInput.value = item.center_lat || '';
+      if (lngInput) lngInput.value = item.center_lng || '';
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  function closeJurisdictionModal() {
+    const modal = document.getElementById('jurisdiction-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function handleSaveJurisdiction(e) {
+    if (e) e.preventDefault();
+    const level = document.getElementById('jurisdiction-unit-level').value;
+    const id = document.getElementById('jurisdiction-unit-id').value;
+    const parent = document.getElementById('jurisdiction-parent-select') ? document.getElementById('jurisdiction-parent-select').value : '';
+    const nameEn = document.getElementById('jurisdiction-name-en').value.trim();
+    const nameBn = document.getElementById('jurisdiction-name-bn').value.trim();
+    const area = parseFloat(document.getElementById('jurisdiction-area-acre').value) || 0.0;
+    const lat = parseFloat(document.getElementById('jurisdiction-center-lat')?.value) || null;
+    const lng = parseFloat(document.getElementById('jurisdiction-center-lng')?.value) || null;
+
+    if (!nameEn) {
+      showToast('Please enter a jurisdiction name', 'error');
+      return;
+    }
+
+    const isEdit = !!id;
+    let url = '';
+    let body = {};
+    if (level === 'division') {
+      url = isEdit ? `/api/admin/jurisdictions/divisions/${id}` : '/api/admin/jurisdictions/divisions';
+      body = { name: nameEn, bengali_name: nameBn, area_acre: area };
+    } else if (level === 'range') {
+      url = isEdit ? `/api/admin/jurisdictions/ranges/${id}` : '/api/admin/jurisdictions/ranges';
+      body = { name: nameEn, division_name: parent, bengali_name: nameBn, area_acre: area };
+    } else {
+      url = isEdit ? `/api/admin/jurisdictions/beats/${id}` : '/api/admin/jurisdictions/beats';
+      body = { name: nameEn, range_name: parent, bengali_name: nameBn, area_acre: area, center_lat: lat, center_lng: lng };
+    }
+
+    try {
+      const res = await fetch(url, {
+        method: isEdit ? 'PUT' : 'POST',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        showToast(`Successfully ${isEdit ? 'updated' : 'saved'} ${level}: ${nameEn}`, 'success');
+        closeJurisdictionModal();
+        loadJurisdictionTree();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to save jurisdiction', 'error');
+      }
+    } catch (err) {
+      showToast('Error saving jurisdiction: ' + err.message, 'error');
+    }
+  }
+
+  function openMoveJurisdictionModal(level, id, name, currentParent) {
+    const modal = document.getElementById('move-jurisdiction-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('move-modal-title');
+    const descEl = document.getElementById('move-modal-desc');
+    const levelInput = document.getElementById('move-unit-level');
+    const idInput = document.getElementById('move-unit-id');
+    const nameInput = document.getElementById('move-unit-name');
+    const labelEl = document.getElementById('move-parent-label');
+    const selectEl = document.getElementById('move-parent-select');
+
+    levelInput.value = level;
+    idInput.value = id;
+    nameInput.value = name;
+
+    titleEl.textContent = `Move ${level.charAt(0).toUpperCase() + level.slice(1)}: ${name}`;
+    descEl.textContent = `Current parent: "${currentParent}". Select new parent jurisdiction to reassign:`;
+
+    if (level === 'beat') {
+      labelEl.textContent = 'New Parent Range';
+      const ranges = state.cachedRanges || [];
+      selectEl.innerHTML = ranges.map(r => `<option value="${escapeHtml(r.name)}" ${r.name === currentParent ? 'selected' : ''}>${escapeHtml(r.name)}</option>`).join('');
+    } else if (level === 'range') {
+      labelEl.textContent = 'New Parent Forest Division';
+      const divisions = state.cachedDivisions || [];
+      selectEl.innerHTML = divisions.map(d => `<option value="${escapeHtml(d.name)}" ${d.name === currentParent ? 'selected' : ''}>${escapeHtml(d.name)}</option>`).join('');
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  function closeMoveJurisdictionModal() {
+    const modal = document.getElementById('move-jurisdiction-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function handleConfirmMove(e) {
+    if (e) e.preventDefault();
+    const level = document.getElementById('move-unit-level').value;
+    const id = document.getElementById('move-unit-id').value;
+    const name = document.getElementById('move-unit-name').value;
+    const newParent = document.getElementById('move-parent-select').value;
+
+    if (!newParent) {
+      showToast('Please select a target parent jurisdiction', 'error');
+      return;
+    }
+
+    let url = '';
+    let body = {};
+    if (level === 'beat') {
+      url = `/api/admin/jurisdictions/beats/${id}`;
+      body = { name: name, range_name: newParent };
+    } else if (level === 'range') {
+      url = `/api/admin/jurisdictions/ranges/${id}`;
+      body = { name: name, division_name: newParent };
+    }
+
+    try {
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body)
+      });
+      if (res.ok) {
+        showToast(`Moved ${name} under "${newParent}" successfully!`, 'success');
+        closeMoveJurisdictionModal();
+        loadJurisdictionTree();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to move jurisdiction', 'error');
+      }
+    } catch (err) {
+      showToast('Error moving jurisdiction: ' + err.message, 'error');
+    }
+  }
+
+  async function deleteJurisdiction(level, id, name) {
+    let confirmMsg = `Are you sure you want to delete ${level} "${name}"?`;
+    if (level === 'division') {
+      confirmMsg += '\n\nWARNING: Deleting this Division will also delete all of its child Ranges and Beats!';
+    } else if (level === 'range') {
+      confirmMsg += '\n\nWARNING: Deleting this Range will also delete all of its child Beats!';
+    }
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const res = await fetch(`/api/admin/jurisdictions/${level}s/${id}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        showToast(`Deleted ${level} "${name}" successfully`, 'info');
+        loadJurisdictionTree();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to delete jurisdiction', 'error');
+      }
+    } catch (err) {
+      showToast('Error deleting jurisdiction: ' + err.message, 'error');
+    }
+  }
+
+  function openBoundaryUploadModal(level = 'beat', unitName = '') {
+    const modal = document.getElementById('boundary-upload-modal');
+    if (!modal) return;
+    const levelSelect = document.getElementById('boundary-upload-level');
+    const unitInput = document.getElementById('boundary-upload-unit-name');
+    const fileInput = document.getElementById('boundary-file-input');
+
+    if (levelSelect) levelSelect.value = level;
+    if (unitInput) unitInput.value = unitName;
+    if (fileInput) fileInput.value = '';
+
+    modal.style.display = 'flex';
+  }
+
+  function closeBoundaryUploadModal() {
+    const modal = document.getElementById('boundary-upload-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function handleUploadBoundary(e) {
+    if (e) e.preventDefault();
+    const level = document.getElementById('boundary-upload-level').value;
+    const name = document.getElementById('boundary-upload-unit-name').value.trim();
+    const fileInput = document.getElementById('boundary-file-input');
+
+    if (!name) {
+      showToast('Please specify jurisdiction unit name', 'error');
+      return;
+    }
+    if (!fileInput.files || fileInput.files.length === 0) {
+      showToast('Please select a GeoJSON boundary file', 'error');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('level', level);
+    formData.append('name', name);
+    formData.append('file', fileInput.files[0]);
+
+    const submitBtn = document.getElementById('boundary-upload-submit-btn');
+    if (submitBtn) {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Uploading...';
+    }
+
+    try {
+      const res = await fetch('/api/admin/jurisdictions/boundary', {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: formData
+      });
+      if (res.ok) {
+        showToast(`Boundary for ${name} uploaded and saved!`, 'success');
+        closeBoundaryUploadModal();
+        loadJurisdictionTree();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Boundary upload failed', 'error');
+      }
+    } catch (err) {
+      showToast('Boundary upload error: ' + err.message, 'error');
+    } finally {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Upload & Save Boundary';
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // User Management & Access Control (Pillar 4)
+  // ---------------------------------------------------------------------------
+  async function loadUsersTable() {
+    const tbody = document.getElementById('users-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4">Loading user accounts...</td></tr>';
+
+    try {
+      const res = await fetch('/api/admin/users', { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const users = await res.json();
+      state.cachedUsers = users;
+
+      if (!users.length) {
+        tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">No users found.</td></tr>';
+        return;
+      }
+
+      const roleBadge = (role) => {
+        switch (role) {
+          case 'admin': return '<span class="badge badge-purple">Admin / DFO</span>';
+          case 'range_officer': return '<span class="badge badge-info">Range Officer</span>';
+          case 'beat_officer': return '<span class="badge badge-secondary">Beat Officer</span>';
+          default: return '<span class="badge badge-outline">Viewer</span>';
+        }
+      };
+
+      tbody.innerHTML = users.map(u => {
+        const scopeDesc = u.assigned_beat ? `Beat: ${escapeHtml(u.assigned_beat)}` : (u.assigned_range ? `Range: ${escapeHtml(u.assigned_range)}` : 'All Ranges & Beats');
+        const perms = [];
+        if (u.can_upload) perms.push('<span class="badge badge-success" style="font-size:10px;">Upload</span>');
+        if (u.can_edit) perms.push('<span class="badge badge-info" style="font-size:10px;">Edit</span>');
+        if (!perms.length) perms.push('<span class="badge badge-outline" style="font-size:10px;">Read-Only</span>');
+
+        const statusBadge = u.is_active !== false ? '<span class="badge badge-success">Active</span>' : '<span class="badge badge-danger">Disabled</span>';
+
+        return `
+          <tr>
+            <td>
+              <strong>${escapeHtml(u.full_name || u.username)}</strong>
+              <div class="text-muted text-xs">@${escapeHtml(u.username)}</div>
+            </td>
+            <td>
+              ${roleBadge(u.role)}
+              <div class="text-muted text-xs mt-1">${escapeHtml(u.role_title || '')}</div>
+            </td>
+            <td>${escapeHtml(u.division || 'All Divisions')}</td>
+            <td>${scopeDesc}</td>
+            <td><div style="display:flex; gap:4px; flex-wrap:wrap;">${perms.join('')}</div></td>
+            <td>${statusBadge}</td>
+            <td class="text-right">
+              <button class="btn btn-outline btn-xs" onclick="window.AdminApp.openUserModal(${u.id})">Edit</button>
+              <button class="btn btn-danger btn-xs ml-1" onclick="window.AdminApp.deleteUser(${u.id}, '${escapeHtml(u.username)}')">Delete</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    } catch (e) {
+      console.error('loadUsersTable error:', e);
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-danger">Failed to load users: ' + escapeHtml(e.message) + '</td></tr>';
+    }
+  }
+
+  function openUserModal(userId = null) {
+    const modal = document.getElementById('user-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('user-modal-title');
+    const idInput = document.getElementById('user-edit-id');
+    const uInput = document.getElementById('user-username');
+    const pInput = document.getElementById('user-password');
+    const pHelp = document.getElementById('user-password-help');
+    const fnInput = document.getElementById('user-fullname');
+    const rSelect = document.getElementById('user-role');
+    const rtInput = document.getElementById('user-role-title');
+    const divInput = document.getElementById('user-division');
+    const rngSelect = document.getElementById('user-assigned-range');
+    const btSelect = document.getElementById('user-assigned-beat');
+    const canUp = document.getElementById('user-can-upload');
+    const canEd = document.getElementById('user-can-edit');
+    const isAct = document.getElementById('user-is-active');
+
+    idInput.value = userId || '';
+    if (userId) {
+      if (titleEl) titleEl.textContent = 'Edit User Account';
+      if (pHelp) pHelp.style.display = 'block';
+      if (pInput) pInput.required = false;
+
+      const u = (state.cachedUsers || []).find(x => x.id === userId);
+      if (u) {
+        if (uInput) uInput.value = u.username || '';
+        if (pInput) pInput.value = '';
+        if (fnInput) fnInput.value = u.full_name || '';
+        if (rSelect) rSelect.value = u.role || 'viewer';
+        if (rtInput) rtInput.value = u.role_title || '';
+        if (divInput) divInput.value = u.division || 'Biodiversity Conservation Division';
+        if (rngSelect) rngSelect.value = u.assigned_range || '';
+        if (btSelect) btSelect.value = u.assigned_beat || '';
+        if (canUp) canUp.checked = !!u.can_upload;
+        if (canEd) canEd.checked = u.can_edit !== false;
+        if (isAct) isAct.checked = u.is_active !== false;
+      }
+    } else {
+      if (titleEl) titleEl.textContent = 'Add New User';
+      if (pHelp) pHelp.style.display = 'none';
+      if (pInput) pInput.required = true;
+
+      if (uInput) uInput.value = '';
+      if (pInput) pInput.value = '';
+      if (fnInput) fnInput.value = '';
+      if (rSelect) rSelect.value = 'beat_officer';
+      if (rtInput) rtInput.value = 'Beat Officer';
+      if (divInput) divInput.value = 'Biodiversity Conservation Division';
+      if (rngSelect) rngSelect.value = '';
+      if (btSelect) btSelect.value = '';
+      if (canUp) canUp.checked = false;
+      if (canEd) canEd.checked = true;
+      if (isAct) isAct.checked = true;
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  function closeUserModal() {
+    const modal = document.getElementById('user-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async function handleSaveUser(e) {
+    if (e) e.preventDefault();
+    const id = document.getElementById('user-edit-id').value;
+    const username = document.getElementById('user-username').value.trim();
+    const password = document.getElementById('user-password').value;
+    const full_name = document.getElementById('user-fullname').value.trim();
+    const role = document.getElementById('user-role').value;
+    const role_title = document.getElementById('user-role-title').value.trim();
+    const division = document.getElementById('user-division').value.trim();
+    const assigned_range = document.getElementById('user-assigned-range').value || null;
+    const assigned_beat = document.getElementById('user-assigned-beat').value || null;
+    const can_upload = document.getElementById('user-can-upload').checked;
+    const can_edit = document.getElementById('user-can-edit').checked;
+    const is_active = document.getElementById('user-is-active').checked;
+
+    if (!username) {
+      showToast('Username is required', 'error');
+      return;
+    }
+
+    const payload = {
+      username,
+      full_name,
+      role,
+      role_title,
+      division,
+      assigned_range,
+      assigned_beat,
+      can_upload,
+      can_edit,
+      is_active
+    };
+    if (password) {
+      payload.password = password;
+    }
+
+    try {
+      const url = id ? `/api/admin/users/${id}` : '/api/admin/users';
+      const method = id ? 'PUT' : 'POST';
+
+      const res = await fetch(url, {
+        method,
+        headers: getAuthHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(payload)
+      });
+
+      if (res.ok) {
+        showToast(id ? `Updated user @${username}` : `Created user @${username}`, 'success');
+        closeUserModal();
+        loadUsersTable();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to save user', 'error');
+      }
+    } catch (err) {
+      showToast('Error saving user: ' + err.message, 'error');
+    }
+  }
+
+  async function deleteUser(userId, username) {
+    if (!confirm(`Are you sure you want to delete user @${username}?`)) {
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/admin/users/${userId}`, {
+        method: 'DELETE',
+        headers: getAuthHeaders()
+      });
+      if (res.ok) {
+        showToast(`User @${username} deleted`, 'info');
+        loadUsersTable();
+      } else {
+        const err = await res.json();
+        showToast(err.detail || 'Failed to delete user', 'error');
+      }
+    } catch (err) {
+      showToast('Error deleting user: ' + err.message, 'error');
+    }
+  }
+
+  // Expose global methods for table action buttons
+  window.AdminApp = {
+    openJurisdictionModal,
+    openEditJurisdictionModal,
+    closeJurisdictionModal,
+    openMoveJurisdictionModal,
+    closeMoveJurisdictionModal,
+    deleteJurisdiction,
+    toggleCollapse,
+    collapseAll,
+    expandAll,
+    openBoundaryUploadModal,
+    closeBoundaryUploadModal,
+    openUserModal,
+    closeUserModal,
+    deleteUser
+  };
 
 })();

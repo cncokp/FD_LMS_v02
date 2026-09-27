@@ -220,19 +220,8 @@ const SpatialCache = {
   },
 
   async get(key) {
-    try {
-      const db = await this.getDB();
-      if (!db) return null;
-      return new Promise((resolve) => {
-        const tx = db.transaction(this.storeName, 'readonly');
-        const store = tx.objectStore(this.storeName);
-        const req = store.get(key);
-        req.onsuccess = () => resolve(req.result || null);
-        req.onerror = () => resolve(null);
-      });
-    } catch {
-      return null;
-    }
+    // Browser caching completely disabled per user requirement: always query fresh from the local server
+    return null;
   },
 
   async set(key, val) {
@@ -331,6 +320,9 @@ const MapEngine = {
     allPlots: null,
     forestPlots: null,
     csPlots: null,
+    divisionBoundary: null,
+    rangeBoundaries: null,
+    rangeLabels: null,
     beatBoundaries: null,
     beatLabels: null,
     encroachments: null,
@@ -342,6 +334,8 @@ const MapEngine = {
     allPlots: null,
     forestPlots: null,
     cs: null,
+    divisionBoundary: null,
+    rangeBoundaries: null,
     beatBoundaries: null,
     encroachments: null
   },
@@ -349,6 +343,8 @@ const MapEngine = {
   rawCSData: null,
   rawEncroachData: null,
   rawBeatData: null,
+  rawRangeData: null,
+  rawDivisionData: null,
   currentCSFeatures: [],
   forestFeatures: [],
   nonForestFeatures: [],
@@ -357,13 +353,23 @@ const MapEngine = {
   _selectedUid: null,
   _selectedPlotId: null,
   isAllPlotsVisible: false,
-  isForestPlotsVisible: true,
+  isForestPlotsVisible: false,
   isCSPlotsVisible: false,
-  isBeatBoundariesVisible: true,
-  isEncroachmentsVisible: true,
-  isRsPlotsVisible: true,
+  isRangeBoundariesVisible: true,
+  isBeatBoundariesVisible: false,
+  isEncroachmentsVisible: false,
+  isRsPlotsVisible: false,
   _plotClicked: false,
 
+  allRangesBounds: [
+    [24.036167, 90.349777],
+    [24.181344, 90.468268]
+  ],
+  divisionBounds: [
+    [24.036167, 90.349777],
+    [24.181344, 90.468268]
+  ],
+  allRangesCenter: [24.108755, 90.409022],
   defaultParkBounds: [
     [24.057734, 90.388016],
     [24.102262, 90.426809]
@@ -371,16 +377,16 @@ const MapEngine = {
   defaultParkCenter: [24.079874, 90.407504],
 
   resetToDefaultExtent() {
-    if (this.map && this.defaultParkBounds) {
+    if (this.map && this.allRangesBounds) {
       this.map.invalidateSize();
-      this.map.fitBounds(this.defaultParkBounds, { padding: [8, 8] });
+      this.map.fitBounds(this.allRangesBounds, { padding: [15, 15] });
     }
   },
 
   async init() {
     this.map = L.map('map', {
-      center: this.defaultParkCenter,
-      zoom: 14.5,
+      center: this.allRangesCenter,
+      zoom: 12.5,
       minZoom: 10,
       maxZoom: 22,
       zoomControl: false,
@@ -395,7 +401,7 @@ const MapEngine = {
       preferCanvas: true
     });
 
-    this.map.fitBounds(this.defaultParkBounds, { padding: [8, 8], animate: false });
+    this.map.fitBounds(this.allRangesBounds, { padding: [15, 15], animate: false });
 
     L.control.scale({ metric: true, imperial: false, position: 'bottomright' }).addTo(this.map);
 
@@ -465,15 +471,18 @@ const MapEngine = {
 
     this.activeSurveyMode = 'rs';
     this.layers.allPlots = L.featureGroup([], { pane: 'csPane' });
-    this.layers.forestPlots = L.featureGroup([], { pane: 'csPane' }).addTo(this.map);
-    this.layers.rsPlots = L.featureGroup([], { pane: 'csPane' }).addTo(this.map);
+    this.layers.forestPlots = L.featureGroup([], { pane: 'csPane' });
+    this.layers.rsPlots = L.featureGroup([], { pane: 'csPane' });
     this.layers.csPlots = this.layers.allPlots;
     this.isAllPlotsVisible = false;
-    this.isForestPlotsVisible = true;
-    this.isRsPlotsVisible = true;
-    this.layers.beatBoundaries = L.featureGroup([], { pane: 'beatPane' }).addTo(this.map);
-    this.layers.beatLabels = L.featureGroup([], { pane: 'labelPane' }).addTo(this.map);
-    this.layers.encroachments = L.featureGroup([], { pane: 'encroachPane' }).addTo(this.map);
+    this.isForestPlotsVisible = false;
+    this.isRsPlotsVisible = false;
+    this.layers.divisionBoundary = L.featureGroup([], { pane: 'beatPane' }).addTo(this.map);
+    this.layers.rangeBoundaries = L.featureGroup([], { pane: 'beatPane' }).addTo(this.map);
+    this.layers.rangeLabels = L.featureGroup([], { pane: 'labelPane' }).addTo(this.map);
+    this.layers.beatBoundaries = L.featureGroup([], { pane: 'beatPane' });
+    this.layers.beatLabels = L.featureGroup([], { pane: 'labelPane' });
+    this.layers.encroachments = L.featureGroup([], { pane: 'encroachPane' });
     this.layers.hover = L.featureGroup([], { pane: 'hoverPane' }).addTo(this.map);
     this.layers.highlight = L.featureGroup([], { pane: 'highlightPane' }).addTo(this.map);
     this.layers.filterHighlight = L.featureGroup([], { pane: 'highlightPane' }).addTo(this.map);
@@ -482,10 +491,12 @@ const MapEngine = {
     this.map.addLayer(this.labelLayer);
 
     this.map.on('zoomend', () => {
+      this.updateRangeLabelsVisibility();
       this.updateBeatLabelsVisibility();
     });
 
     this.map.on('moveend', () => {
+      this.updateRangeLabelsVisibility();
       this.updateBeatLabelsVisibility();
       if (this.canvasRenderer && this.canvasRenderer._map && !this.map._animatingZoom) {
         try {
@@ -626,8 +637,10 @@ const MapEngine = {
     // Stage 0: Zoom directly to Park Beat extent by default on first loading
     this.resetToDefaultExtent();
 
-    // Stage 1: Load Beat Boundaries + Encroachments + RS Plots immediately (<100ms)
+    // Stage 1: Load Administrative Boundaries (Division & Ranges) + Beat Boundaries + Encroachments + RS Plots
     await Promise.all([
+      this.loadDivisionBoundary(),
+      this.loadRangeBoundaries(),
       this.loadBeatBoundaries(),
       this.loadEncroachments(),
       this.loadRSPlots()
@@ -1367,6 +1380,169 @@ const MapEngine = {
     this.updateActiveLayerCount();
   },
 
+  async loadDivisionBoundary() {
+    try {
+      const res = await fetch('/api/hierarchy/division/geojson');
+      const data = await res.json();
+      if (data && data.features && data.features.length > 0) {
+        this.rawDivisionData = data;
+        if (this.layers.divisionBoundary) {
+          this.layers.divisionBoundary.clearLayers();
+          const geoLayer = L.geoJSON(data, {
+            pane: 'beatPane',
+            interactive: false,
+            style: () => ({
+              color: '#059669',
+              weight: 3.5,
+              opacity: 0.90,
+              fillColor: '#10b981',
+              fillOpacity: 0.02,
+              dashArray: '10, 6'
+            })
+          });
+          this.geoLayers.divisionBoundary = geoLayer;
+          geoLayer.addTo(this.layers.divisionBoundary);
+        }
+      }
+    } catch (e) {
+      console.warn("Failed to load division boundary:", e);
+    }
+  },
+
+  async loadRangeBoundaries() {
+    const CACHE_KEY = 'range_boundaries_v1';
+    const CACHE_TTL = 86400 * 1000;
+
+    try {
+      const cached = await SpatialCache.get(CACHE_KEY);
+      if (cached && cached._ts && (Date.now() - cached._ts) < CACHE_TTL && cached.data && cached.data.features) {
+        this.rawRangeData = cached.data;
+        this.renderRangeBoundariesGeoJSON(cached.data);
+        return;
+      }
+    } catch (err) {
+      console.warn('Range boundary cache lookup failed:', err);
+    }
+
+    try {
+      const res = await fetch('/api/hierarchy/ranges/geojson');
+      const data = await res.json();
+      if (data && data.features && data.features.length > 0) {
+        SpatialCache.set(CACHE_KEY, { data, _ts: Date.now() });
+        this.rawRangeData = data;
+        this.renderRangeBoundariesGeoJSON(data);
+      }
+    } catch (e) {
+      console.warn("Failed to load range boundaries:", e);
+    }
+  },
+
+  renderRangeBoundariesGeoJSON(geojsonData) {
+    if (!this.layers.rangeBoundaries) return;
+    this.layers.rangeBoundaries.clearLayers();
+    if (this.layers.rangeLabels) this.layers.rangeLabels.clearLayers();
+    if (!geojsonData || !geojsonData.features) return;
+
+    const geoLayer = L.geoJSON(geojsonData, {
+      pane: 'beatPane',
+      interactive: true,
+      style: (feature) => {
+        const isNP = (feature.properties && feature.properties.range_name || '').includes('National Park');
+        return {
+          color: isNP ? '#0284c7' : '#7c3aed',
+          weight: 3.2,
+          opacity: 0.95,
+          fillColor: isNP ? '#0284c7' : '#7c3aed',
+          fillOpacity: 0.05,
+          dashArray: '8, 6'
+        };
+      },
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const rName = p.range_name || 'Forest Range';
+        const acres = p.area_acre ? `${Number(p.area_acre).toLocaleString()} Acres` : '';
+        layer.bindTooltip(`
+          <div style="font-family: inherit; font-size: 11px; padding: 2px 4px;">
+            <div style="font-weight: 700; color: #0284c7;"><i class="fa-solid fa-compass"></i> ${rName}</div>
+            <div style="color: #64748b; font-size: 10px;">${acres} &bull; Administrative Range</div>
+            <div style="color: #0284c7; font-size: 9.5px; margin-top: 2px;"><i class="fa-solid fa-arrow-pointer"></i> Click to drill down</div>
+          </div>
+        `, { sticky: true, opacity: 0.95 });
+
+        layer.on('mouseover', function () {
+          this.setStyle({
+            weight: 4.5,
+            fillOpacity: 0.12,
+            dashArray: null
+          });
+        });
+        layer.on('mouseout', function () {
+          geoLayer.resetStyle(this);
+        });
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (window.AppDrillDown) {
+            window.AppDrillDown('range', rName);
+          }
+        });
+      }
+    });
+
+    this.geoLayers.rangeBoundaries = geoLayer;
+    geoLayer.addTo(this.layers.rangeBoundaries);
+
+    // Range Labels (visible at zoom < 14)
+    for (const feat of geojsonData.features) {
+      const p = feat.properties || {};
+      const center = p.center;
+      if (center && this.layers.rangeLabels) {
+        const isNP = (p.range_name || '').includes('National Park');
+        const color = isNP ? '#0284c7' : '#7c3aed';
+        const rangeIcon = L.divIcon({
+          className: 'range-map-marker-container',
+          html: `<div class="range-map-label" style="border-left: 3px solid ${color}; color: ${color};">${p.range_name}</div>`,
+          iconSize: [0, 0],
+          iconAnchor: [0, 0]
+        });
+        L.marker([center[1], center[0]], {
+          icon: rangeIcon,
+          pane: 'labelPane',
+          interactive: false
+        }).addTo(this.layers.rangeLabels);
+      }
+    }
+    this.updateRangeLabelsVisibility();
+  },
+
+  updateRangeLabelsVisibility() {
+    if (!this.layers.rangeLabels) return;
+    const zoom = this.map ? this.map.getZoom() : 13;
+    const shouldShow = Boolean(this.isRangeBoundariesVisible && zoom < 14);
+    if (shouldShow) {
+      if (!this.map.hasLayer(this.layers.rangeLabels)) {
+        this.map.addLayer(this.layers.rangeLabels);
+      }
+    } else {
+      if (this.map.hasLayer(this.layers.rangeLabels)) {
+        this.map.removeLayer(this.layers.rangeLabels);
+      }
+    }
+  },
+
+  toggleRangeBoundaries(visible) {
+    this.isRangeBoundariesVisible = visible;
+    if (visible) {
+      if (!this.map.hasLayer(this.layers.rangeBoundaries)) {
+        this.map.addLayer(this.layers.rangeBoundaries);
+      }
+    } else {
+      if (this.map.hasLayer(this.layers.rangeBoundaries)) {
+        this.map.removeLayer(this.layers.rangeBoundaries);
+      }
+    }
+    this.updateRangeLabelsVisibility();
+  },
+
   async loadBeatBoundaries() {
     const CACHE_KEY   = 'beat_boundaries';
     const CACHE_TTL   = 86400 * 1000; // 24 hours
@@ -1403,19 +1579,50 @@ const MapEngine = {
     if (this.layers.beatLabels) this.layers.beatLabels.clearLayers();
     if (!geojsonData || !geojsonData.features) return;
 
-    // 1. Static Beat Boundary Polygons (no tooltip, no hover styling changes)
+    // 1. Interactive Beat Boundary Polygons
     const geoLayer = L.geoJSON(geojsonData, {
       pane: 'beatPane',
-      interactive: false,
+      interactive: true,
       style: () => ({
         color: '#0284c7',
         weight: 2.2,
         opacity: 0.90,
         fillColor: '#38bdf8',
         fillOpacity: 0.04,
-        dashArray: '6, 5',
-        interactive: false
-      })
+        dashArray: '6, 5'
+      }),
+      onEachFeature: (feature, layer) => {
+        const p = feature.properties || {};
+        const rawName = (p.raw_name || p.beat_name || 'Beat').trim();
+        const displayName = rawName.toLowerCase().endsWith('beat') ? rawName : `${rawName} Beat`;
+        const acres = p.area_acre ? `${Number(p.area_acre).toLocaleString()} Acres` : '';
+
+        layer.bindTooltip(`
+          <div style="font-family: inherit; font-size: 11px; padding: 2px 4px;">
+            <div style="font-weight: 700; color: #0284c7;"><i class="fa-solid fa-tree"></i> ${displayName}</div>
+            <div style="color: #64748b; font-size: 10px;">${acres} &bull; Forest Beat</div>
+            <div style="color: #0284c7; font-size: 9.5px; margin-top: 2px;"><i class="fa-solid fa-arrow-pointer"></i> Click to drill down</div>
+          </div>
+        `, { sticky: true, opacity: 0.95 });
+
+        layer.on('mouseover', function () {
+          this.setStyle({
+            color: '#0369a1',
+            weight: 3.5,
+            fillOpacity: 0.12,
+            dashArray: null
+          });
+        });
+        layer.on('mouseout', function () {
+          geoLayer.resetStyle(this);
+        });
+        layer.on('click', (e) => {
+          L.DomEvent.stopPropagation(e);
+          if (window.AppDrillDown) {
+            window.AppDrillDown('beat', displayName);
+          }
+        });
+      }
     });
 
     this.geoLayers.beatBoundaries = geoLayer;
@@ -1485,7 +1692,6 @@ const MapEngine = {
       }
     }
 
-
     this.updateBeatLabelsVisibility();
   },
 
@@ -1534,6 +1740,107 @@ const MapEngine = {
       this.map.fitBounds([[miny, minx], [maxy, maxx]], { padding: [15, 15] });
     } else if (beat.lat && beat.lng) {
       this.map.setView([beat.lat, beat.lng], 13.5, { animate: true });
+    }
+  },
+
+  setJurisdiction(level, name) {
+    const rangeToggle = document.getElementById('toggleRangeBoundaries');
+    const beatToggle = document.getElementById('toggleBeatBoundaries');
+    const rsToggle = document.getElementById('toggleRsPlots');
+    const csToggle = document.getElementById('toggleCSPlots');
+    const forestToggle = document.getElementById('toggleForestPlots');
+    const encroachToggle = document.getElementById('toggleEncroachments');
+
+    if (level === 'division') {
+      // 1. Zoom to all ranges extent on first load / division overview
+      this.map.fitBounds(this.allRangesBounds, { padding: [15, 15] });
+
+      // 2. ONLY Range boundaries visible on the map
+      this.toggleRangeBoundaries(true);
+      if (rangeToggle) rangeToggle.checked = true;
+
+      // 3. Hide Beat boundaries, plots, and encroachments
+      this.toggleBeatBoundaries(false);
+      if (beatToggle) beatToggle.checked = false;
+
+      this.toggleRsPlots(false, false);
+      if (rsToggle) rsToggle.checked = false;
+
+      this.toggleCSPlots(false);
+      if (csToggle) csToggle.checked = false;
+
+      this.toggleForestPlots(false);
+      if (forestToggle) forestToggle.checked = false;
+
+      this.toggleEncroachments(false);
+      if (encroachToggle) encroachToggle.checked = false;
+
+      this.clearHighlight();
+
+    } else if (level === 'range') {
+      // 1. Zoom to selected Range
+      if (this.rawRangeData && this.rawRangeData.features) {
+        const feat = this.rawRangeData.features.find(f => {
+          const rName = (f.properties && f.properties.range_name || '').toLowerCase();
+          return rName === (name || '').toLowerCase() || rName.includes((name || '').toLowerCase());
+        });
+        if (feat && feat.properties && feat.properties.bounds) {
+          const b = feat.properties.bounds;
+          this.map.fitBounds([[b[1], b[0]], [b[3], b[2]]], { padding: [25, 25] });
+        }
+      }
+
+      // 2. Keep Range boundary visible
+      this.toggleRangeBoundaries(true);
+      if (rangeToggle) rangeToggle.checked = true;
+
+      // 3. Instantly show Beat boundaries for this Range
+      this.toggleBeatBoundaries(true);
+      if (beatToggle) beatToggle.checked = true;
+
+      // 4. Keep plots and encroachments hidden at range level
+      this.toggleRsPlots(false, false);
+      if (rsToggle) rsToggle.checked = false;
+
+      this.toggleCSPlots(false);
+      if (csToggle) csToggle.checked = false;
+
+      this.toggleForestPlots(false);
+      if (forestToggle) forestToggle.checked = false;
+
+      this.toggleEncroachments(false);
+      if (encroachToggle) encroachToggle.checked = false;
+
+      this.clearHighlight();
+
+    } else if (level === 'beat') {
+      // 1. Zoom to selected Beat
+      if (this.rawBeatData && this.rawBeatData.features) {
+        const norm = s => (s || '').trim().toLowerCase().replace(/\s*beat$/i, '');
+        const target = norm(name);
+        const feat = this.rawBeatData.features.find(f => {
+          const b = norm(f.properties && f.properties.beat_name);
+          const r = norm(f.properties && f.properties.raw_name);
+          return b === target || r === target;
+        });
+        if (feat) {
+          this.flyToBeat(feat.properties);
+        }
+      }
+
+      // 2. Keep Beat boundary visible
+      this.toggleBeatBoundaries(true);
+      if (beatToggle) beatToggle.checked = true;
+
+      // 3. By default RS Plot boundaries appear with symbology!
+      this.toggleRsPlots(true, true);
+      if (rsToggle) rsToggle.checked = true;
+
+      this.toggleForestPlots(true);
+      if (forestToggle) forestToggle.checked = true;
+
+      this.toggleEncroachments(true);
+      if (encroachToggle) encroachToggle.checked = true;
     }
   },
 

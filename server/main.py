@@ -19,7 +19,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pydantic import BaseModel
 
-from server import db, auth, admin_db, uploader
+from server import db, auth, admin_db, uploader, hierarchy
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
@@ -62,17 +62,18 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 class CacheControlMiddleware(BaseHTTPMiddleware):
     """
-    Fine-grained cache headers:
-    - /              → no-cache (HTML must always be re-validated)
-    - /admin         → no-cache
-    - /static/js/    → 1-year immutable (cache-busted via ?v= query param)
-    - /static/css/   → 1-year immutable (cache-busted via ?v= query param)
-    - /static/data/  → 24h (beat boundaries GeoJSON, etc.)
-    - /static/*.svg  → 24h (logos)
-    - /api/          → no-store
+    Enforces strict zero-cache policy in local dev mode when FD_LOCAL_MODE is enabled.
+    In production mode, provides fine-grained caching.
     """
     async def dispatch(self, request, call_next):
         response = await call_next(request)
+        if getattr(db, "FD_LOCAL_MODE", False):
+            # Development Mode: zero browser cache so uploads & edits are instant
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
         if request.method == "GET" and response.status_code == 200:
             path = request.url.path
             if path == "/" or path.startswith("/admin") or path.endswith(".html"):
@@ -268,35 +269,118 @@ def export_csv():
 # ---------------------------------------------------------------------------
 # Admin Authentication Endpoints
 # ---------------------------------------------------------------------------
+# Authentication & Role-Based Access Control (RBAC)
+# ---------------------------------------------------------------------------
 class LoginPayload(BaseModel):
     username: str
     password: str
 
 
+@app.post("/api/auth/login")
 @app.post("/api/admin/login")
-def admin_login(creds: LoginPayload, response: Response):
-    if not auth.verify_credentials(creds.username, creds.password):
-        raise HTTPException(status_code=401, detail="Invalid admin username or password")
-    token = auth.create_access_token(creds.username)
+def api_login(creds: LoginPayload, response: Response):
+    user = auth.authenticate_user(creds.username, creds.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = auth.create_access_token(user)
+    
+    # Set cookies for web app and admin
     response.set_cookie(
-        key="fd_admin_session",
+        key="fd_user_session",
         value=token,
         max_age=auth.TOKEN_EXPIRY_SECONDS,
         httponly=True,
         samesite="lax"
     )
-    return {"success": True, "token": token, "username": creds.username}
+    if user.get("role") == "admin":
+        response.set_cookie(
+            key="fd_admin_session",
+            value=token,
+            max_age=auth.TOKEN_EXPIRY_SECONDS,
+            httponly=True,
+            samesite="lax"
+        )
+    return {
+        "success": True,
+        "token": token,
+        "access_token": token,
+        "user": user,
+        "username": user["username"],
+        "role": user["role"]
+    }
 
 
+@app.post("/api/auth/logout")
 @app.post("/api/admin/logout")
-def admin_logout(response: Response):
+def api_logout(response: Response):
+    response.delete_cookie(key="fd_user_session")
     response.delete_cookie(key="fd_admin_session")
     return {"success": True}
 
 
+@app.get("/api/auth/me")
+async def api_auth_me(request: Request):
+    user = await auth.get_current_user_optional(request)
+    if not user:
+        return {"authenticated": False, "user": None}
+    return {"authenticated": True, "user": user}
+
+
+@app.get("/api/auth/seed_accounts")
+def api_auth_seed_accounts():
+    """Returns list of seed demo accounts for quick role switching in local development"""
+    accounts = []
+    for uname, udata in auth.SEED_USERS.items():
+        accounts.append({
+            "username": uname,
+            "password": udata["password"],
+            "role": udata["role"],
+            "role_title": udata["role_title"],
+            "assigned_range": udata.get("assigned_range"),
+            "assigned_beat": udata.get("assigned_beat")
+        })
+    return {"accounts": accounts}
+
+
 @app.get("/api/admin/me")
 def admin_me(current_user: dict = Depends(auth.get_current_admin)):
-    return {"authenticated": True, "username": current_user["username"]}
+    return {"authenticated": True, "username": current_user["username"], "user": current_user}
+
+
+# ---------------------------------------------------------------------------
+# Administrative Hierarchy Endpoints (Division > Range > Beat)
+# ---------------------------------------------------------------------------
+@app.get("/api/hierarchy/tree")
+def api_hierarchy_tree():
+    return hierarchy.get_hierarchy_tree()
+
+
+@app.get("/api/hierarchy/division/geojson")
+def api_hierarchy_division_geojson():
+    return hierarchy.get_division_geojson()
+
+
+@app.get("/api/hierarchy/ranges/geojson")
+def api_hierarchy_ranges_geojson():
+    return hierarchy.get_ranges_geojson()
+
+
+@app.get("/api/hierarchy/beats/geojson")
+def api_hierarchy_beats_geojson(range_name: Optional[str] = Query(None)):
+    fc = hierarchy.get_beats_geojson()
+    if not range_name:
+        return fc
+    # Filter by range
+    filtered_features = [
+        f for f in fc.get("features", [])
+        if (f.get("properties", {}).get("range_name") == range_name or
+            f.get("properties", {}).get("range") == range_name)
+    ]
+    return {
+        "type": "FeatureCollection",
+        "name": f"beats_{range_name}",
+        "features": filtered_features
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +507,9 @@ async def admin_upload_commit(
     target_table: str = Form(...),
     mode: str = Form("append"),
     mapping_json: Optional[str] = Form(None),
+    division_name: Optional[str] = Form(None),
+    range_name: Optional[str] = Form(None),
+    beat_name: Optional[str] = Form(None),
     current_user: dict = Depends(auth.get_current_admin)
 ):
     contents = await file.read()
@@ -432,10 +519,219 @@ async def admin_upload_commit(
             custom_mapping = json.loads(mapping_json)
         except Exception:
             pass
+
+    jurisdiction_scope = {}
+    if division_name and division_name.strip():
+        jurisdiction_scope["division_name"] = division_name.strip()
+    if range_name and range_name.strip():
+        jurisdiction_scope["range_name"] = range_name.strip()
+    if beat_name and beat_name.strip():
+        jurisdiction_scope["beat_name"] = beat_name.strip()
+
     try:
-        return uploader.commit_upload(contents, file.filename, target_table, mode, custom_mapping)
+        return uploader.commit_upload(
+            contents,
+            file.filename,
+            target_table,
+            mode,
+            custom_mapping,
+            jurisdiction_scope=jurisdiction_scope if jurisdiction_scope else None
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Commit error: {str(e)}")
+
+
+# ---------------------------------------------------------------------------
+# Admin User Management Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/admin/users")
+def admin_list_users(current_user: dict = Depends(auth.get_current_admin)):
+    return auth.get_all_users()
+
+
+@app.post("/api/admin/users")
+async def admin_create_user(
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return auth.create_user(data)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"User creation failed: {str(e)}")
+
+
+@app.put("/api/admin/users/{user_id}")
+async def admin_update_user(
+    user_id: int,
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    updated = auth.update_user(user_id, data)
+    if not updated:
+        raise HTTPException(status_code=404, detail="User not found or update failed")
+    return updated
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    ok = auth.delete_user(user_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="User not found or could not be deleted")
+    return {"success": True, "deleted_id": user_id}
+
+
+# ---------------------------------------------------------------------------
+# Admin Jurisdiction Management Endpoints
+# ---------------------------------------------------------------------------
+@app.get("/api/admin/jurisdictions/divisions")
+def admin_get_divisions(current_user: dict = Depends(auth.get_current_admin)):
+    return hierarchy.get_all_divisions()
+
+
+@app.get("/api/admin/jurisdictions/ranges")
+def admin_get_ranges(
+    division: Optional[str] = Query(None),
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    return hierarchy.get_all_ranges(division)
+
+
+@app.get("/api/admin/jurisdictions/beats")
+def admin_get_beats(
+    range_name: Optional[str] = Query(None),
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    return hierarchy.get_all_beats(range_name)
+
+
+@app.post("/api/admin/jurisdictions/divisions")
+async def admin_create_division(
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return hierarchy.create_division(data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/admin/jurisdictions/divisions/{division_id}")
+async def admin_update_division(
+    division_id: int,
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return hierarchy.update_division(division_id, data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/admin/jurisdictions/divisions/{division_id}")
+def admin_delete_division(
+    division_id: int,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    ok = hierarchy.delete_division(division_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Division not found or deletion failed")
+    return {"success": True, "deleted_id": division_id}
+
+
+@app.post("/api/admin/jurisdictions/ranges")
+async def admin_create_range(
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return hierarchy.create_range(data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/admin/jurisdictions/ranges/{range_id}")
+async def admin_update_range(
+    range_id: int,
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return hierarchy.update_range(range_id, data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/admin/jurisdictions/ranges/{range_id}")
+def admin_delete_range(
+    range_id: int,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    ok = hierarchy.delete_range(range_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Range not found or deletion failed")
+    return {"success": True, "deleted_id": range_id}
+
+
+@app.post("/api/admin/jurisdictions/beats")
+async def admin_create_beat(
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return hierarchy.create_beat(data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/admin/jurisdictions/beats/{beat_id}")
+async def admin_update_beat(
+    beat_id: int,
+    request: Request,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    data = await request.json()
+    try:
+        return hierarchy.update_beat(beat_id, data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/admin/jurisdictions/beats/{beat_id}")
+def admin_delete_beat(
+    beat_id: int,
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    ok = hierarchy.delete_beat(beat_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="Beat not found or deletion failed")
+    return {"success": True, "deleted_id": beat_id}
+
+
+@app.post("/api/admin/jurisdictions/boundary")
+async def admin_upload_boundary(
+    level: str = Form(...),
+    name: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: dict = Depends(auth.get_current_admin)
+):
+    contents = await file.read()
+    try:
+        geojson_data = json.loads(contents.decode("utf-8"))
+        return hierarchy.save_jurisdiction_boundary(level, name, geojson_data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Invalid GeoJSON: {str(e)}")
 
 
 @app.post("/api/admin/rs/sync_dataset")

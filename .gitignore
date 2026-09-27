@@ -17,6 +17,10 @@ env/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/pgdata/
+data/pg.log
+pgsql/
+*.zip
 DB/
 
 # GIS Lock files & temporary files

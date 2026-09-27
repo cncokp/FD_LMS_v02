@@ -635,7 +635,8 @@ def commit_upload(
     filename: str,
     target_table: str,
     mode: str = "append",
-    custom_mapping: Optional[Dict[str, str]] = None
+    custom_mapping: Optional[Dict[str, str]] = None,
+    jurisdiction_scope: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     if target_table not in admin_db.ALLOWED_TABLES:
         raise ValueError(f"Target table '{target_table}' not supported")
@@ -680,6 +681,14 @@ def commit_upload(
 
         for r in raw_rows:
             mapped = map_row_to_schema(r, mapping, target_table)
+            if jurisdiction_scope:
+                if jurisdiction_scope.get("division_name"):
+                    mapped["division_name"] = jurisdiction_scope["division_name"]
+                if jurisdiction_scope.get("range_name"):
+                    mapped["range_name"] = jurisdiction_scope["range_name"]
+                if jurisdiction_scope.get("beat_name"):
+                    mapped["beat_name"] = jurisdiction_scope["beat_name"]
+
             geom = mapped.pop("_geometry", None) or r.get("_geometry")
             if not geom:
                 continue
@@ -777,6 +786,59 @@ def commit_upload(
                 "label_radius": p.get("label_radius") or 0.0,
             })
         admin_db._snapshot_records[target_table] = admin_records
+
+        # Persist GIS features in Local PostgreSQL if enabled
+        if db.is_local_pg_enabled():
+            try:
+                from psycopg2.extras import Json
+                with db.get_pg_connection() as conn:
+                    with conn.cursor() as cur:
+                        if mode == "replace":
+                            cur.execute(f"TRUNCATE TABLE {target_table} RESTART IDENTITY CASCADE;")
+                        for f in (new_features if mode != "replace" else all_final_features):
+                            p = f.get("properties", {})
+                            geom = f.get("geometry")
+                            bb = f.get("bbox", [0, 0, 0, 0])
+                            u = str(p.get("uid") or p.get("rs_uid") or "")
+                            ru = str(p.get("rs_uid") or u)
+                            if target_table == "rs_plots":
+                                cur.execute("""
+                                    INSERT INTO rs_plots (
+                                        uid, rs_uid, uid2, plot_no, mouza, jl_no, beat_name, range_name,
+                                        area_acre, label_lat, label_lng, label_radius,
+                                        minx, miny, maxx, maxy, geometry, properties
+                                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT DO NOTHING;
+                                """, (
+                                    u, ru, ru, p.get("plot_no") or "", p.get("mouza") or "", p.get("jl_no") or "",
+                                    p.get("beat_name") or "", p.get("range_name") or "",
+                                    float(p.get("area_acre") or 0.0), float(p.get("label_lat") or 0.0),
+                                    float(p.get("label_lng") or 0.0), float(p.get("label_radius") or 0.0),
+                                    float(bb[0]) if len(bb) == 4 else 0.0, float(bb[1]) if len(bb) == 4 else 0.0,
+                                    float(bb[2]) if len(bb) == 4 else 0.0, float(bb[3]) if len(bb) == 4 else 0.0,
+                                    Json(geom) if geom else None, Json(p)
+                                ))
+                            else:
+                                cur.execute("""
+                                    INSERT INTO cs_plots (
+                                        uid, plot_no, mouza, jl_no, beat_name, range_name,
+                                        area_acre, label_lat, label_lng, label_radius,
+                                        minx, miny, maxx, maxy, geometry, properties
+                                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                    ON CONFLICT DO NOTHING;
+                                """, (
+                                    u, p.get("plot_no") or "", p.get("mouza") or "", p.get("jl_no") or "",
+                                    p.get("beat_name") or "", p.get("range_name") or "",
+                                    float(p.get("area_acre") or 0.0), float(p.get("label_lat") or 0.0),
+                                    float(p.get("label_lng") or 0.0), float(p.get("label_radius") or 0.0),
+                                    float(bb[0]) if len(bb) == 4 else 0.0, float(bb[1]) if len(bb) == 4 else 0.0,
+                                    float(bb[2]) if len(bb) == 4 else 0.0, float(bb[3]) if len(bb) == 4 else 0.0,
+                                    Json(geom) if geom else None, Json(p)
+                                ))
+                    conn.commit()
+            except Exception as e:
+                print(f"[Uploader] Local PG GIS insert error: {e}")
+
         db.invalidate_cache(target_table)
 
         steps_executed = [
@@ -848,6 +910,15 @@ def commit_upload(
 
     for raw in raw_rows:
         mapped = map_row_to_schema(raw, mapping, target_table)
+        if jurisdiction_scope:
+            if jurisdiction_scope.get("division_name"):
+                mapped["division_name"] = jurisdiction_scope["division_name"]
+            if jurisdiction_scope.get("range_name"):
+                mapped["range"] = jurisdiction_scope["range_name"]
+                mapped["range_name"] = jurisdiction_scope["range_name"]
+            if jurisdiction_scope.get("beat_name"):
+                mapped["beat_name"] = jurisdiction_scope["beat_name"]
+
         uid = mapped.get("uid") or mapped.get("cs_uid") or mapped.get("rs_uid")
 
         if mode == "upsert" and uid and str(uid) in existing_by_uid:
@@ -855,6 +926,7 @@ def commit_upload(
             for k, v in mapped.items():
                 if v is not None and not k.startswith("_"):
                     existing_rec[k] = v
+            admin_db.update_record(target_table, int(existing_rec.get("id") or 0), existing_rec)
             updated += 1
         else:
             clean_rec = {k: v for k, v in mapped.items() if not k.startswith("_")}

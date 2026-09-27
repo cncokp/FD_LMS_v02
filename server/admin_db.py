@@ -139,11 +139,33 @@ def _init_snapshot_records_if_needed():
         if any(r.get("rs_uid") for r in _snapshot_records["parcel_info"][:50]):
             return
 
+    # 1. When in Local PostgreSQL Mode: load directly from local PostgreSQL
+    if db.is_local_pg_enabled():
+        try:
+            with db.get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT * FROM parcel_info ORDER BY id ASC")
+                    parcels = [dict(r) for r in cur.fetchall()]
+                    cur.execute("SELECT * FROM encroachment_info ORDER BY id ASC")
+                    encroachments = [dict(r) for r in cur.fetchall()]
+                    cur.execute("SELECT id, uid, rs_uid, plot_no, mouza, jl_no, beat_name, area_acre, label_lat, label_lng, label_radius FROM rs_plots ORDER BY id ASC")
+                    rs_plots = [dict(r) for r in cur.fetchall()]
+                    cur.execute("SELECT id, uid, plot_no, mouza, jl_no, beat_name, area_acre, label_lat, label_lng, label_radius FROM cs_plots ORDER BY id ASC")
+                    cs_plots = [dict(r) for r in cur.fetchall()]
+
+                    _snapshot_records["parcel_info"] = parcels
+                    _snapshot_records["encroachment_info"] = encroachments
+                    _snapshot_records["rs_plots"] = rs_plots
+                    _snapshot_records["cs_plots"] = cs_plots
+                    return
+        except Exception as e:
+            print(f"[AdminDB] Error loading local PostgreSQL: {e}")
+
     parcels: List[Dict[str, Any]] = []
     encroachments: List[Dict[str, Any]] = []
     loaded_from_live = False
 
-    # 1. Attempt to load live records directly from Supabase Cloud
+    # 2. Attempt to load live records directly from Supabase Cloud
     if db.is_supabase_cloud_enabled():
         try:
             from concurrent.futures import ThreadPoolExecutor
@@ -748,6 +770,23 @@ def create_record(table: str, data: Dict[str, Any]) -> Dict[str, Any]:
             if "uid2" in TABLE_FIELDS[table]:
                 cleaned["uid2"] = gen_uid
 
+    # Persist in Local PostgreSQL if enabled
+    if db.is_local_pg_enabled():
+        try:
+            with db.get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    fields = [f for f in TABLE_FIELDS.get(table, []) if f != "id" and f in cleaned and cleaned[f] is not None]
+                    if fields:
+                        cols = ", ".join(fields)
+                        placeholders = ", ".join(["%s"] * len(fields))
+                        vals = [cleaned[f] for f in fields]
+                        cur.execute(f"INSERT INTO {table} ({cols}) VALUES ({placeholders}) RETURNING id;", vals)
+                        new_db_id = cur.fetchone()["id"]
+                        cleaned["id"] = new_db_id
+                conn.commit()
+        except Exception as e:
+            print(f"[AdminDB] Local PG insert error: {e}")
+
     records.insert(0, cleaned)
     db.invalidate_cache()
     return cleaned
@@ -782,6 +821,21 @@ def update_record(table: str, record_id: int, data: Dict[str, Any]) -> Optional[
                 r["beat_name"] = normalize_beat(data["beat_name"])
             if "cs_uid" in r and "uid" not in r: r["uid"] = r["cs_uid"]
             if "rs_uid" in r and "uid2" not in r: r["uid2"] = r["rs_uid"]
+
+            # Persist in Local PostgreSQL if enabled
+            if db.is_local_pg_enabled():
+                try:
+                    with db.get_pg_connection() as conn:
+                        with conn.cursor() as cur:
+                            fields = [f for f in TABLE_FIELDS.get(table, []) if f != "id" and f in data]
+                            if fields:
+                                set_clause = ", ".join([f"{f} = %s" for f in fields])
+                                vals = [data[f] for f in fields] + [record_id]
+                                cur.execute(f"UPDATE {table} SET {set_clause}, updated_at = NOW() WHERE id = %s;", vals)
+                        conn.commit()
+                except Exception as e:
+                    print(f"[AdminDB] Local PG update error: {e}")
+
             db.invalidate_cache()
             return dict(r)
     return None
@@ -798,6 +852,17 @@ def delete_record(table: str, record_id: int) -> bool:
     for i, r in enumerate(records):
         if str(r.get("id")) == str(record_id):
             records.pop(i)
+
+            # Persist delete in Local PostgreSQL if enabled
+            if db.is_local_pg_enabled():
+                try:
+                    with db.get_pg_connection() as conn:
+                        with conn.cursor() as cur:
+                            cur.execute(f"DELETE FROM {table} WHERE id = %s;", (record_id,))
+                        conn.commit()
+                except Exception as e:
+                    print(f"[AdminDB] Local PG delete error: {e}")
+
             db.invalidate_cache()
             return True
     return False

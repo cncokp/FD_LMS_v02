@@ -53,15 +53,44 @@
         <img src="/static/bdfd_logo.svg" alt="Forest Department Logo" class="brand-logo-img brand-logo-left" />
         <div class="brand-titles">
           <div class="brand-title-primary">Forest Land and Encroachment Management System</div>
-          <div class="brand-title-secondary">Forest Department</div>
+          <div class="brand-title-secondary">Forest Department &bull; Wildlife & Biodiversity Conservation Division</div>
           <div class="brand-title-tertiary">Government of the People's Republic of Bangladesh</div>
         </div>
         <img src="/static/gob_logo.svg" alt="Government of Bangladesh Logo" class="brand-logo-img brand-logo-right" />
       </div>
+
+      <!-- Active Jurisdiction Breadcrumbs -->
+      <div class="nav-breadcrumbs" id="navBreadcrumbs">
+        <button class="bc-item active" id="bcDivision" data-level="division" title="View Full Division (Bhawal National Park)">
+          <i class="fa-solid fa-sitemap"></i> <span>Division</span>
+        </button>
+        <span class="bc-sep" id="bcSepRange" style="display:none;">/</span>
+        <button class="bc-item" id="bcRange" data-level="range" style="display:none;"></button>
+        <span class="bc-sep" id="bcSepBeat" style="display:none;">/</span>
+        <button class="bc-item" id="bcBeat" data-level="beat" style="display:none;"></button>
+      </div>
+
       <div class="nav-actions">
-        <a href="/admin" class="nav-admin-link" title="Admin Portal" aria-label="Admin Portal">
+        <button class="btn-nav-action" id="btnOpenJurisdictionModal" title="Select Administrative Jurisdiction">
+          <i class="fa-solid fa-compass"></i>
+          <span>Jurisdiction</span>
+        </button>
+        <div class="user-auth-widget" id="userAuthWidget">
+          <button class="btn-login-trigger" id="btnOpenLoginModal">
+            <i class="fa-solid fa-user-circle"></i>
+            <span>Login</span>
+          </button>
+          <div class="user-profile-badge" id="userProfileBadge" style="display:none;">
+            <span class="user-role-tag" id="userRoleTag">Admin</span>
+            <span class="user-name-text" id="userNameText">DFO</span>
+            <button class="btn-logout-mini" id="btnLogoutMini" title="Sign Out">
+              <i class="fa-solid fa-right-from-bracket"></i>
+            </button>
+          </div>
+        </div>
+        <a href="/admin" class="nav-admin-link" id="navAdminLink" title="Admin Portal" aria-label="Admin Portal">
           <i class="fa-solid fa-user-shield"></i>
-          <span>Admin Portal</span>
+          <span>Admin</span>
         </a>
         <button class="theme-toggle-btn" id="btnThemeToggle" title="Switch Theme (Light/Dark)" aria-label="Switch Theme">
           <i class="fa-solid fa-sun icon-sun"></i>
@@ -129,14 +158,14 @@
         
         <!-- Tab Bar -->
         <div class="horizontal-tab-bar" id="horizontalTabBar" role="tablist">
-          <button class="tab-btn active" id="tabBtnLayers" role="tab" title="Cadastral Layers">
-            <i class="fa-solid fa-layer-group"></i>
-            <span>Layers</span>
-          </button>
-          <button class="tab-btn" id="tabBtnFilter" role="tab" title="Spatial Filter">
+          <button class="tab-btn active" id="tabBtnFilter" role="tab" title="Spatial Filter & Administrative Drill-Down">
             <i class="fa-solid fa-filter"></i>
             <span>Filter</span>
             <span class="tab-filter-dot hidden" id="tabFilterDot"></span>
+          </button>
+          <button class="tab-btn" id="tabBtnLayers" role="tab" title="Cadastral Layers">
+            <i class="fa-solid fa-layer-group"></i>
+            <span>Layers</span>
           </button>
           <div class="tab-divider"></div>
           <div class="expandable-search-container" id="expandableSearchContainer">
@@ -156,15 +185,16 @@
         <!-- Expandable Panel -->
         <div class="dropdown-panel" id="dropdownPanel">
           <div class="panel-header-mini">
-            <h3 id="panelHeaderTitle"><i class="fa-solid fa-layer-group"></i> Layers</h3>
+            <h3 id="panelHeaderTitle"><i class="fa-solid fa-filter"></i> Spatial Filter & Drill-Down</h3>
             <button class="btn-icon" id="btnCloseDropdownPanel" title="Collapse Panel">
               <i class="fa-solid fa-chevron-up"></i>
             </button>
           </div>
 
           <div class="panel-scroll-body">
-            <div class="flyout-view" id="viewLayers">
-              <!-- Cadastral Layer Toggles -->
+
+            <!-- View 1: Cadastral Layers -->
+            <div class="flyout-view hidden" id="viewLayers">
               <div class="control-group">
                 <div id="layerListContainer" style="display: flex; flex-direction: column; gap: 8px;">
                   
@@ -210,7 +240,21 @@
                     </div>
                   </div>
 
-                  <!-- 4. Beat Boundary Layer -->
+                  <!-- 4. Range Boundary Layer -->
+                  <div class="layer-item highlight-cyan">
+                    <label class="toggle-switch">
+                      <input type="checkbox" id="toggleRangeBoundaries" checked />
+                      <span class="slider cyan"></span>
+                    </label>
+                    <div class="layer-desc">
+                      <span class="layer-title title-range">Range Boundaries</span>
+                      <span class="layer-legend-pill">
+                        <span class="dot cyan"></span> 2 Ranges &bull; NP & Bhawal
+                      </span>
+                    </div>
+                  </div>
+
+                  <!-- 5. Beat Boundary Layer -->
                   <div class="layer-item highlight-blue">
                     <label class="toggle-switch">
                       <input type="checkbox" id="toggleBeatBoundaries" checked />
@@ -243,9 +287,58 @@
 
             </div>
 
-            <!-- View 2: Spatial Filter -->
-            <div class="flyout-view hidden" id="viewFilter">
+            <!-- View 2: Spatial Filter & Administrative Drill-Down -->
+            <div class="flyout-view" id="viewFilter">
               <div class="filter-controls-container">
+
+                <!-- Active Jurisdiction KPI Summary -->
+                <div class="hierarchy-kpi-card" id="hierarchyKpiCard" style="margin-bottom: 12px;">
+                  <div class="kpi-header">
+                    <div class="kpi-badge" id="kpiLevelBadge">Division Level</div>
+                    <h4 class="kpi-title" id="kpiTitle">Bhawal National Park</h4>
+                    <p class="kpi-subtitle" id="kpiSubtitle">Biodiversity Conservation Division</p>
+                  </div>
+                  <div class="kpi-grid">
+                    <div class="kpi-stat">
+                      <span class="kpi-val" id="kpiArea">24,718</span>
+                      <span class="kpi-lbl">Total Acres</span>
+                    </div>
+                    <div class="kpi-stat">
+                      <span class="kpi-val" id="kpiForestParcels">3,518</span>
+                      <span class="kpi-lbl">Forest Plots</span>
+                    </div>
+                    <div class="kpi-stat">
+                      <span class="kpi-val" id="kpiCadastralPlots">19,463</span>
+                      <span class="kpi-lbl">Cadastre (RS)</span>
+                    </div>
+                    <div class="kpi-stat">
+                      <span class="kpi-val" id="kpiEncroachments">41</span>
+                      <span class="kpi-lbl">Encroachments</span>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- Division Selection -->
+                <div class="filter-field">
+                  <label for="filterDivisionSelect">
+                    <i class="fa-solid fa-landmark" style="color: #60a5fa;"></i> Forest Division
+                  </label>
+                  <select id="filterDivisionSelect" class="filter-select">
+                    <option value="Biodiversity Conservation Division">Biodiversity Conservation Division</option>
+                  </select>
+                </div>
+
+                <!-- Range Selection -->
+                <div class="filter-field">
+                  <label for="filterRangeSelect">
+                    <i class="fa-solid fa-compass" style="color: #34d399;"></i> Forest Range
+                  </label>
+                  <select id="filterRangeSelect" class="filter-select">
+                    <option value="">All Ranges (Division Overview)</option>
+                    <option value="National Park Range">National Park Range</option>
+                    <option value="Bhawal Range">Bhawal Range</option>
+                  </select>
+                </div>
                 
                 <!-- Beat Selection -->
                 <div class="filter-field">
@@ -253,7 +346,7 @@
                     <i class="fa-solid fa-tree-city" style="color: #38bdf8;"></i> Forest Beat
                   </label>
                   <select id="filterBeatSelect" class="filter-select">
-                    <option value="">All Beats</option>
+                    <option value="">All Beats (Range Overview)</option>
                     <option value="Park Beat">Park Beat</option>
                     <option value="Bankhoira">Bankhoira Beat</option>
                     <option value="Baruipara">Baruipara Beat</option>
@@ -307,7 +400,7 @@
                 <!-- Action Buttons -->
                 <div class="filter-actions-row">
                   <button type="button" class="btn btn-primary btn-sm" id="btnApplyFilter">
-                    <i class="fa-solid fa-filter"></i> Apply
+                    <i class="fa-solid fa-filter"></i> Apply Filter
                   </button>
                   <button type="button" class="btn btn-secondary btn-sm" id="btnResetFilter">
                     <i class="fa-solid fa-rotate-left"></i> Reset
@@ -340,6 +433,141 @@
     </main>
   </div>
 
+  <!-- 1. JURISDICTION DRILL-DOWN PROMPT MODAL -->
+  <div class="modal-overlay-custom" id="jurisdictionModal" style="display: none;">
+    <div class="modal-card-custom">
+      <div class="modal-header-custom">
+        <div class="modal-header-brand">
+          <img src="/static/bdfd_logo.svg" alt="Forest Department" class="modal-logo" />
+          <div>
+            <h3 class="modal-title">Administrative Jurisdiction Drill-Down</h3>
+            <p class="modal-subtitle">Biodiversity Conservation Division &bull; Bhawal National Park</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close-modal" id="btnCloseJurisdictionModal" title="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body-custom">
+        <p style="font-size: 13px; color: #94a3b8; margin-top: 0; margin-bottom: 14px;">
+          Select an administrative unit to zoom, inspect boundaries, and filter cadastral parcel records:
+        </p>
+
+        <div class="drilldown-cards-grid">
+          <!-- Division Card -->
+          <div class="drilldown-card featured" id="cardDrillDivision" data-level="division">
+            <div class="drilldown-card-info">
+              <h4><i class="fa-solid fa-sitemap" style="color:#10b981;"></i> Entire Bhawal National Park</h4>
+              <p>Full Division Overview &bull; 2 Ranges &bull; 7 Beats &bull; 24,718 Acres</p>
+            </div>
+            <div class="drilldown-card-action">
+              <span>View All</span> <i class="fa-solid fa-arrow-right"></i>
+            </div>
+          </div>
+
+          <!-- National Park Range Card -->
+          <div class="drilldown-card" id="cardDrillRangeNP" data-level="range" data-range="National Park Range">
+            <div class="drilldown-card-info">
+              <h4><i class="fa-solid fa-compass" style="color:#06b6d4;"></i> National Park Range</h4>
+              <p>3 Beats: Park Beat, Bankhoira Beat, Baupara Beat &bull; 9,157 Acres</p>
+            </div>
+            <div class="drilldown-card-action">
+              <span>Drill Down</span> <i class="fa-solid fa-arrow-right"></i>
+            </div>
+          </div>
+
+          <!-- Bhawal Range Card -->
+          <div class="drilldown-card" id="cardDrillRangeBhawal" data-level="range" data-range="Bhawal Range">
+            <div class="drilldown-card-info">
+              <h4><i class="fa-solid fa-compass" style="color:#8b5cf6;"></i> Bhawal Range</h4>
+              <p>4 Beats: BK Bari, Rajendrapur West, Baruipara, Bhabanipur &bull; 15,561 Acres</p>
+            </div>
+            <div class="drilldown-card-action">
+              <span>Drill Down</span> <i class="fa-solid fa-arrow-right"></i>
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 14px;">
+          <label style="font-size: 11px; font-weight: 700; text-transform: uppercase; color: #94a3b8; display: block; margin-bottom: 6px;">
+            Or jump directly to a Forest Beat:
+          </label>
+          <div class="beats-pills-row" id="drilldownBeatsPills">
+            <button class="beat-pill-btn" data-beat="Park Beat">Park Beat</button>
+            <button class="beat-pill-btn" data-beat="Bankhoira Beat">Bankhoira Beat</button>
+            <button class="beat-pill-btn" data-beat="Baupara Beat">Baupara Beat</button>
+            <button class="beat-pill-btn" data-beat="BK Bari Beat">BK Bari Beat</button>
+            <button class="beat-pill-btn" data-beat="Rajendrapur West Beat">Rajendrapur West</button>
+            <button class="beat-pill-btn" data-beat="Baruipara Beat">Baruipara Beat</button>
+            <button class="beat-pill-btn" data-beat="Bhabanipur Beat">Bhabanipur Beat</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. ROLE-BASED ACCESS CONTROL (RBAC) LOGIN MODAL -->
+  <div class="modal-overlay-custom" id="userLoginModal" style="display: none;">
+    <div class="modal-card-custom" style="max-width: 440px;">
+      <div class="modal-header-custom">
+        <div class="modal-header-brand">
+          <img src="/static/bdfd_logo.svg" alt="Forest Department" class="modal-logo" />
+          <div>
+            <h3 class="modal-title">FD-LMS Portal Login</h3>
+            <p class="modal-subtitle">Role-Based Cadastral & Land Management Access</p>
+          </div>
+        </div>
+        <button type="button" class="btn-close-modal" id="btnCloseLoginModal" title="Close">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+      <div class="modal-body-custom">
+        <form id="userLoginForm" onsubmit="return false;">
+          <div id="loginAlertBox" style="display:none; padding: 8px 12px; border-radius: 6px; font-size: 12px; margin-bottom: 12px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5;"></div>
+
+          <div style="margin-bottom: 12px;">
+            <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">Username</label>
+            <input type="text" id="inputUsername" class="filter-input" placeholder="e.g. admin or ro_national_park" required autocomplete="username" />
+          </div>
+
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: block; margin-bottom: 4px;">Password</label>
+            <input type="password" id="inputPassword" class="filter-input" placeholder="Enter password" required autocomplete="current-password" />
+          </div>
+
+          <button type="submit" class="btn btn-primary" id="btnSubmitLogin" style="width: 100%; justify-content: center; padding: 9px;">
+            <i class="fa-solid fa-right-to-bracket"></i> Sign In
+          </button>
+        </form>
+
+        <!-- Quick Role Switcher for Local Development / Verification -->
+        <div class="quick-roles-bar">
+          <div class="quick-roles-title">Quick Demo Roles (1-Click Switch):</div>
+          <div class="quick-roles-buttons">
+            <button type="button" class="btn-role-quick" data-u="admin" data-p="admin123" title="Division Admin - All Access">
+              <i class="fa-solid fa-shield-halved"></i> DFO Admin
+            </button>
+            <button type="button" class="btn-role-quick" data-u="ro_national_park" data-p="range123" title="Range Officer - National Park">
+              <i class="fa-solid fa-compass"></i> RO Nat. Park
+            </button>
+            <button type="button" class="btn-role-quick" data-u="ro_bhawal" data-p="range123" title="Range Officer - Bhawal Range">
+              <i class="fa-solid fa-compass"></i> RO Bhawal
+            </button>
+            <button type="button" class="btn-role-quick" data-u="bo_park" data-p="beat123" title="Beat Officer - Park Beat">
+              <i class="fa-solid fa-tree"></i> BO Park Beat
+            </button>
+            <button type="button" class="btn-role-quick" data-u="bo_baupara" data-p="beat123" title="Beat Officer - Baupara Beat">
+              <i class="fa-solid fa-tree"></i> BO Baupara
+            </button>
+            <button type="button" class="btn-role-quick" data-u="guest" data-p="guest123" title="Viewer / Public">
+              <i class="fa-solid fa-eye"></i> Guest
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Cache Purge & Fresh Assets (runs immediately, before deferred scripts) -->
   <script>
     if ('serviceWorker' in navigator) {
@@ -355,8 +583,8 @@
   </script>
   <!-- Leaflet & App Scripts — defer keeps HTML parsing non-blocking; order is preserved -->
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin="" defer></script>
-  <script src="/static/js/dossier.js?v=20260913_06" defer></script>
-  <script src="/static/js/map.js?v=20260913_06" defer></script>
-  <script src="/static/js/app.js?v=20260913_06" defer></script>
+  <script src="/static/js/dossier.js?v=20260919_01" defer></script>
+  <script src="/static/js/map.js?v=20260919_01" defer></script>
+  <script src="/static/js/app.js?v=20260919_01" defer></script>
 </body>
 </html>

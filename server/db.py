@@ -21,6 +21,15 @@ SUPABASE_DB_URL = os.getenv("SUPABASE_DB_URL", "").strip()
 SUPABASE_URL    = os.getenv("SUPABASE_URL", "https://tbffjjlkmzswcmwdkulh.supabase.co").strip()
 SUPABASE_KEY    = os.getenv("SUPABASE_KEY", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRiZmZqamxrbXpzd2Ntd2RrdWxoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODkwMTgwODMsImV4cCI6MjEwNDU5NDA4M30.8QTxmJNbuA91yfNyztrZqq4kvMniN0t9j6C6TaiQyYg").strip()
 
+# Local PostgreSQL Environment (Offline Development)
+FD_LOCAL_MODE = os.getenv("FD_LOCAL_MODE", "1").strip() == "1"
+LOCAL_DB_URL  = os.getenv("LOCAL_DB_URL", "postgresql://postgres@127.0.0.1:5433/fd_lms").strip()
+LOCAL_PG_PORT = int(os.getenv("LOCAL_PG_PORT", 5433))
+
+def is_local_pg_enabled() -> bool:
+    return FD_LOCAL_MODE and bool(LOCAL_DB_URL)
+
+
 import time
 import gzip
 import hashlib
@@ -63,6 +72,10 @@ BEAT_NAME_OVERRIDES: Dict[str, str] = {
 
 def init_disk_cache():
     """Pre-loads spatial datasets and bulk dossier directly from disk snapshots in <10ms."""
+    if is_local_pg_enabled():
+        print("[FD-LMS] Local PostgreSQL mode active: clean schema placeholders ready for fresh data.")
+        return
+
     global _cs_cache_bytes, _cs_gzip_bytes, _cs_etag
     global _bulk_dossier_cache_bytes, _bulk_dossier_gzip_bytes, _bulk_dossier_etag
     global _encroach_cache_bytes, _encroach_gzip_bytes, _encroach_etag
@@ -239,16 +252,27 @@ def rebuild_snapshots() -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Connection helpers
 # ---------------------------------------------------------------------------
+def is_local_pg_enabled() -> bool:
+    return FD_LOCAL_MODE and bool(LOCAL_DB_URL)
+
 def is_supabase_pg_enabled() -> bool:
+    if is_local_pg_enabled():
+        return False
     return bool(SUPABASE_DB_URL)
 
 def is_supabase_cloud_enabled() -> bool:
+    if is_local_pg_enabled():
+        return False
     return bool(SUPABASE_URL and SUPABASE_KEY)
+
+def is_supabase_enabled() -> bool:
+    return is_supabase_cloud_enabled() or is_supabase_pg_enabled()
 
 def get_pg_connection():
     import psycopg2
     from psycopg2.extras import RealDictCursor
-    return psycopg2.connect(SUPABASE_DB_URL, cursor_factory=RealDictCursor)
+    url = LOCAL_DB_URL if is_local_pg_enabled() else SUPABASE_DB_URL
+    return psycopg2.connect(url, cursor_factory=RealDictCursor)
 
 def _supabase_request(
     path: str,
@@ -272,6 +296,30 @@ def _supabase_request(
 # Stats
 # ---------------------------------------------------------------------------
 def get_stats() -> Dict[str, Any]:
+    if is_local_pg_enabled():
+        try:
+            with get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT COUNT(*) AS c FROM rs_plots;")
+                    rs_count = cur.fetchone()["c"]
+                    cur.execute("SELECT COUNT(*) AS c FROM cs_plots;")
+                    cs_count = cur.fetchone()["c"]
+                    cur.execute("SELECT COUNT(*) AS c FROM parcel_info;")
+                    parcel_count = cur.fetchone()["c"]
+                    cur.execute("SELECT COUNT(*) AS c FROM encroachment_info;")
+                    encroach_count = cur.fetchone()["c"]
+                    return {
+                        "cs_plots_count": cs_count,
+                        "rs_plots_count": rs_count,
+                        "total_parcels": parcel_count,
+                        "encroachments_count": encroach_count,
+                        "backend": "Local PostgreSQL 16 (Offline Dev)",
+                        "status": "Active",
+                        "linked_key": "uid"
+                    }
+        except Exception as e:
+            print(f"[FD-LMS] Local PG stats error ({e})")
+
     if is_supabase_pg_enabled():
         try:
             with get_pg_connection() as conn:
@@ -401,8 +449,12 @@ def get_cs_plots_json_bytes(
 ) -> bytes:
     global _cs_cache_bytes
     is_unfiltered = not bbox and not plot_no and not uid
-    if is_unfiltered and _cs_cache_bytes is not None:
-        return _cs_cache_bytes
+    if is_local_pg_enabled():
+        try:
+            return _get_cs_plots_supabase_pg(bbox, plot_no, uid, limit, is_unfiltered)
+        except Exception as e:
+            print(f"[FD-LMS] Local PG CS plots error ({e})")
+            return b'{"type":"FeatureCollection","count":0,"bounds":null,"features":[]}'
 
     if is_supabase_pg_enabled():
         try:
@@ -504,6 +556,91 @@ def _get_cs_plots_supabase_pg(bbox, plot_no, uid, limit, is_unfiltered) -> bytes
     return result_bytes
 
 
+def _assemble_rs_features_json(rows: List[Dict[str, Any]]) -> bytes:
+    if not rows:
+        return b'{"type":"FeatureCollection","count":0,"bounds":null,"features":[]}'
+
+    minx_agg, miny_agg, maxx_agg, maxy_agg = 180.0, 90.0, -180.0, -90.0
+    feat_strs = []
+
+    for r in rows:
+        rx1 = float(r["minx"]) if r.get("minx") is not None else 0.0
+        ry1 = float(r["miny"]) if r.get("miny") is not None else 0.0
+        rx2 = float(r["maxx"]) if r.get("maxx") is not None else 0.0
+        ry2 = float(r["maxy"]) if r.get("maxy") is not None else 0.0
+        if rx1 and rx2 and ry1 and ry2:
+            if rx1 < minx_agg: minx_agg = rx1
+            if ry1 < miny_agg: miny_agg = ry1
+            if rx2 > maxx_agg: maxx_agg = rx2
+            if ry2 > maxy_agg: maxy_agg = ry2
+
+        pid = r["id"]
+        uid_str = str(r.get("uid") or r.get("rs_uid") or "")
+        rs_uid_str = str(r.get("rs_uid") or uid_str)
+        geom = r.get("geometry") or r.get("geojson")
+        geom_str = json.dumps(geom) if isinstance(geom, dict) else (str(geom) if geom else "null")
+
+        props = dict(r.get("properties") or {})
+        props.update({
+            "id": pid,
+            "uid": uid_str,
+            "rs_uid": rs_uid_str,
+            "plot_no": r.get("plot_no") or "",
+            "mouza": r.get("mouza") or "",
+            "jl_no": r.get("jl_no") or "",
+            "beat_name": r.get("beat_name") or "",
+            "range_name": r.get("range_name") or "",
+            "area_acre": float(r.get("area_acre") or 0.0),
+            "label_lat": float(r.get("label_lat") or 0.0),
+            "label_lng": float(r.get("label_lng") or 0.0),
+            "label_radius": float(r.get("label_radius") or 0.0)
+        })
+        props_str = json.dumps(props)
+
+        feat_strs.append(
+            f'{{"type":"Feature","id":{pid},'
+            f'"bbox":[{round(rx1,6)},{round(ry1,6)},{round(rx2,6)},{round(ry2,6)}],'
+            f'"properties":{props_str},'
+            f'"geometry":{geom_str}}}'
+        )
+
+    bounds_str = f'[{round(minx_agg,5)},{round(miny_agg,5)},{round(maxx_agg,5)},{round(maxy_agg,5)}]' if minx_agg <= maxx_agg else "null"
+    full_json = f'{{"type":"FeatureCollection","count":{len(feat_strs)},"bounds":{bounds_str},"features":[{",".join(feat_strs)}]}}'
+    return full_json.encode("utf-8")
+
+
+def _get_rs_plots_local_pg(bbox=None, plot_no=None, uid=None, limit=35000) -> bytes:
+    with get_pg_connection() as conn:
+        with conn.cursor() as cur:
+            clauses = []
+            params = []
+            if bbox:
+                try:
+                    minx, miny, maxx, maxy = map(float, bbox.split(","))
+                    clauses.append("minx <= %s AND maxx >= %s AND miny <= %s AND maxy >= %s")
+                    params.extend([maxx, minx, maxy, miny])
+                except ValueError:
+                    pass
+            if plot_no:
+                clauses.append("plot_no = %s")
+                params.append(str(plot_no))
+            if uid:
+                clauses.append("(uid = %s OR rs_uid = %s)")
+                params.extend([str(uid), str(uid)])
+            where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+            cur.execute(f"""
+                SELECT id, uid, rs_uid, plot_no, mouza, jl_no, beat_name, range_name, division_name,
+                       area_acre, label_lat, label_lng, label_radius, minx, maxx, miny, maxy,
+                       geometry, properties
+                FROM rs_plots
+                {where_sql}
+                ORDER BY id
+                LIMIT {max(1, min(limit, 50000))}
+            """, params)
+            rows = [dict(r) for r in cur.fetchall()]
+            return _assemble_rs_features_json(rows)
+
+
 def get_rs_plots_json_bytes(
     bbox: Optional[str] = None,
     plot_no: Optional[str] = None,
@@ -512,6 +649,13 @@ def get_rs_plots_json_bytes(
 ) -> bytes:
     global _rs_cache_bytes
     is_unfiltered = not bbox and not plot_no and not uid
+
+    if is_local_pg_enabled():
+        try:
+            return _get_rs_plots_local_pg(bbox, plot_no, uid, limit)
+        except Exception as e:
+            print(f"[FD-LMS] Local PG RS plots query error: {e}")
+
     if is_unfiltered and _rs_cache_bytes is not None:
         return _rs_cache_bytes
 
@@ -868,6 +1012,38 @@ def _build_rs_parcel_dossier_payload(
 
 
 def get_rs_plot_dossier(plot_id: int) -> Optional[Dict[str, Any]]:
+    if is_local_pg_enabled():
+        try:
+            with get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT id, uid, rs_uid, plot_no, mouza, jl_no, beat_name,
+                               area_acre, minx, miny, maxx, maxy
+                        FROM rs_plots WHERE id = %s
+                    """, (plot_id,))
+                    plot_row = cur.fetchone()
+                    if plot_row:
+                        plot = dict(plot_row)
+                        r_uid = str(plot.get("rs_uid") or plot.get("uid") or "").strip()
+                        p_no = str(plot.get("plot_no") or "").strip()
+                        cur.execute("""
+                            SELECT * FROM parcel_info
+                            WHERE (rs_uid IS NOT NULL AND rs_uid = %s)
+                               OR (rs_plot_no IS NOT NULL AND rs_plot_no = %s)
+                            ORDER BY id
+                        """, (r_uid, p_no))
+                        matched_parcels = [dict(r) for r in cur.fetchall()]
+                        cur.execute("""
+                            SELECT * FROM encroachment_info
+                            WHERE (rs_uid IS NOT NULL AND rs_uid = %s)
+                               OR (rs_plot_no IS NOT NULL AND rs_plot_no = %s)
+                            ORDER BY id
+                        """, (r_uid, p_no))
+                        matched_encroach = [dict(r) for r in cur.fetchall()]
+                        return _build_rs_parcel_dossier_payload(plot, matched_parcels, matched_encroach)
+        except Exception as e:
+            print(f"[FD-LMS] Local PG RS dossier query error: {e}")
+
     # 1. Attempt from snapshot records
     import server.admin_db as admin_db
     admin_db._init_snapshot_records_if_needed()
@@ -1186,6 +1362,18 @@ def get_bulk_dossier_json_bytes() -> bytes:
     PARCEL_COLS   = "cs_uid,rs_uid,range,beat_name,mouza,cs_jl,rs_jl,cs_plot_no,rs_plot_no,cs_land_acre,total_area,area_fd,area_others,khatian_no,legal_status,remarks"
     ENCROACH_COLS = "uid,encroacher_name,cs_plot_no,rs_plot_no,rs_khatian,sec_20,sec_6,encroached_area_acre,structure_type,action_taken"
 
+    if is_local_pg_enabled():
+        try:
+            with get_pg_connection() as c:
+                with c.cursor() as cur:
+                    cur.execute(f"SELECT {PARCEL_COLS} FROM parcel_info ORDER BY id")
+                    parcel_rows = [dict(r) for r in cur.fetchall()]
+                    cur.execute(f"SELECT {ENCROACH_COLS} FROM encroachment_info ORDER BY id")
+                    encroach_rows = [dict(r) for r in cur.fetchall()]
+                    return _build_bulk_payload(parcel_rows, encroach_rows)
+        except Exception as e:
+            print(f"[FD-LMS] Local PG bulk dossier error: {e}")
+
     if is_supabase_pg_enabled():
         try:
             def _fetch_parcel_pg():
@@ -1255,6 +1443,25 @@ def get_bulk_dossier_json_bytes() -> bytes:
 
 
 def get_encroachment_summary() -> Dict[str, Any]:
+    if is_local_pg_enabled():
+        try:
+            with get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                    SELECT COUNT(DISTINCT uid) AS uids, COUNT(*) AS total,
+                           ROUND(SUM(COALESCE(encroached_area_acre, 0))::numeric, 2) AS acres
+                    FROM encroachment_info
+                    """)
+                    r = cur.fetchone()
+                    return {
+                        "total_parcels":        r["uids"]  or 0,
+                        "total_cases":          r["total"] or 0,
+                        "total_encroached_acre": float(r["acres"] or 0),
+                        "status": "Active"
+                    }
+        except Exception as e:
+            print(f"[FD-LMS] Local PG encroachment summary error ({e})")
+
     if is_supabase_pg_enabled():
         try:
             with get_pg_connection() as conn:
@@ -1300,7 +1507,19 @@ def get_encroachment_geojson_bytes() -> bytes:
     encroach_agg: Dict[str, Any] = {}
     all_encroach_rows: List[Dict] = []
 
-    if is_supabase_pg_enabled():
+    if is_local_pg_enabled():
+        try:
+            with get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT uid, rs_uid, cs_uid, encroacher_name, encroached_area_acre, structure_type, action_taken "
+                        "FROM encroachment_info ORDER BY id"
+                    )
+                    all_encroach_rows = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[FD-LMS] Local PG encroachment rows error ({e})")
+
+    elif is_supabase_pg_enabled():
         try:
             with get_pg_connection() as conn:
                 with conn.cursor() as cur:
@@ -1339,7 +1558,26 @@ def get_encroachment_geojson_bytes() -> bytes:
     # --- Step 2: fetch encroached cs_plots polygons ---
     plot_rows: List[Dict] = []
 
-    if is_supabase_pg_enabled():
+    if is_local_pg_enabled() and encroach_agg:
+        try:
+            with get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    uids = list(encroach_agg.keys())
+                    cur.execute("""
+                        SELECT id, uid, plot_no, mouza, jl_no, area_acre, beat_name,
+                               label_lat, label_lng, label_radius, minx, maxx, miny, maxy, geometry AS geojson
+                        FROM rs_plots WHERE uid = ANY(%s) OR rs_uid = ANY(%s)
+                        UNION
+                        SELECT id, uid, plot_no, mouza, jl_no, area_acre, beat_name,
+                               label_lat, label_lng, label_radius, minx, maxx, miny, maxy, geometry AS geojson
+                        FROM cs_plots WHERE uid = ANY(%s)
+                        ORDER BY id
+                    """, (uids, uids, uids))
+                    plot_rows = [dict(r) for r in cur.fetchall()]
+        except Exception as e:
+            print(f"[FD-LMS] Local PG encroached plots error ({e})")
+
+    elif is_supabase_pg_enabled():
         try:
             with get_pg_connection() as conn:
                 with conn.cursor() as cur:
@@ -1424,6 +1662,34 @@ def search_records(query: str, limit: int = 15) -> List[Dict[str, Any]]:
             q = q[len(prefix):].strip()
     if not q:
         q = raw_q
+
+    if is_local_pg_enabled():
+        try:
+            with get_pg_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                    SELECT id, uid, rs_uid, plot_no, mouza, jl_no, area_acre, beat_name, minx, maxx, miny, maxy, 'RS' as survey_type
+                    FROM rs_plots
+                    WHERE plot_no = %s OR plot_no LIKE %s OR uid = %s OR rs_uid = %s OR mouza ILIKE %s
+                    ORDER BY (plot_no = %s) DESC, id
+                    LIMIT %s
+                    """, (q, f"{q}%", q, q, f"%{q}%", q, limit))
+                    rs_rows = [dict(r) for r in cur.fetchall()]
+                    if len(rs_rows) < limit:
+                        cur.execute("""
+                        SELECT id, uid, plot_no, mouza, jl_no, area_acre, beat_name, minx, maxx, miny, maxy, 'CS' as survey_type
+                        FROM cs_plots
+                        WHERE plot_no = %s OR plot_no LIKE %s OR uid = %s OR mouza ILIKE %s
+                        ORDER BY (plot_no = %s) DESC, id
+                        LIMIT %s
+                        """, (q, f"{q}%", q, f"%{q}%", q, limit - len(rs_rows)))
+                        cs_rows = [dict(r) for r in cur.fetchall()]
+                        rows = rs_rows + cs_rows
+                    else:
+                        rows = rs_rows
+                    return _format_search_results(rows)
+        except Exception as e:
+            print(f"[FD-LMS] Local PG search error: {e}")
 
     if is_supabase_pg_enabled():
         try:

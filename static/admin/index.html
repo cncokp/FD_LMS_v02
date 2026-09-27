@@ -90,24 +90,25 @@
       <!-- SIDEBAR -->
       <aside id="admin-sidebar" class="admin-sidebar">
         <nav class="sidebar-nav">
-          <div class="nav-section-label">General</div>
+          <div class="nav-section-label">Overview</div>
           <button class="nav-item active" data-tab="dashboard">
             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
             <span>Dashboard</span>
           </button>
 
-          <div class="nav-section-label">GIS Spatial Layers (Fixed)</div>
-          <button class="nav-item" data-tab="rs_plots">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83v-4.7l6-2.25 6 2.25v4.7z"/></svg>
-            <span>Plot Boundary (RS)</span>
+          <div class="nav-section-label">1. Jurisdiction Mapping</div>
+          <button class="nav-item" data-tab="jurisdictions">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/></svg>
+            <span>Divisions, Ranges & Beats</span>
           </button>
 
-          <button class="nav-item" data-tab="cs_plots">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
-            <span>Plot Boundary (CS)</span>
+          <div class="nav-section-label">2. New Data Ingestion</div>
+          <button class="nav-item" data-tab="uploader">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+            <span>Upload & Mapping Wizard</span>
           </button>
 
-          <div class="nav-section-label">Tabular Data (Editable)</div>
+          <div class="nav-section-label">3. Existing Data Records</div>
           <button class="nav-item" data-tab="parcel_info">
             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z"/></svg>
             <span>Parcel Information</span>
@@ -118,12 +119,23 @@
             <span>Encroachment Details</span>
           </button>
 
-          <div class="nav-section-label">Tools & Ingestion</div>
-          <button class="nav-item" data-tab="uploader">
-            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
-            <span>Upload & Mapping Wizard</span>
+          <button class="nav-item" data-tab="rs_plots">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 2L4 5v6.09c0 5.05 3.41 9.76 8 10.91 4.59-1.15 8-5.86 8-10.91V5l-8-3zm6 9.09c0 4-2.55 7.7-6 8.83-3.45-1.13-6-4.82-6-8.83v-4.7l6-2.25 6 2.25v4.7z"/></svg>
+            <span>Plot Boundary (RS)</span>
           </button>
 
+          <button class="nav-item" data-tab="cs_plots">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/></svg>
+            <span>Plot Boundary (CS)</span>
+          </button>
+
+          <div class="nav-section-label">4. User Management</div>
+          <button class="nav-item" data-tab="users">
+            <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z"/></svg>
+            <span>Users & RBAC Roles</span>
+          </button>
+
+          <div class="nav-section-label">System</div>
           <button class="nav-item" data-tab="cache_sync">
             <svg viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
             <span>Cache & Snapshots</span>
@@ -347,6 +359,61 @@
           </div>
         </section>
 
+        <!-- TAB: JURISDICTION MANAGEMENT (Pillar 1) -->
+        <section id="tab-jurisdictions" class="tab-pane">
+          <div class="pane-header">
+            <div>
+              <h1 class="pane-title">Administrative Jurisdiction Mapping</h1>
+              <p class="pane-subtitle">Define and manage Division &gt; Range &gt; Beat administrative structure and spatial boundaries</p>
+            </div>
+            <div class="pane-actions" style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-outline btn-sm" id="btn-collapse-all" title="Collapse All Tree Nodes">
+                <span>⊟ Collapse All</span>
+              </button>
+              <button class="btn btn-outline btn-sm" id="btn-expand-all" title="Expand All Tree Nodes">
+                <span>⊞ Expand All</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-add-division">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span>Add Division</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-add-range">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span>Add Range</span>
+              </button>
+              <button class="btn btn-secondary btn-sm" id="btn-add-beat">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+                <span>Add Beat</span>
+              </button>
+              <button class="btn btn-primary btn-sm" id="btn-upload-boundary">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M9 16h6v-6h4l-7-7-7 7h4zm-4 2h14v2H5z"/></svg>
+                <span>Upload Boundary (GeoJSON)</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="table-responsive">
+              <table class="admin-table" id="jurisdiction-table">
+                <thead>
+                  <tr>
+                    <th>Level</th>
+                    <th>Name (English)</th>
+                    <th>Name (Bengali)</th>
+                    <th>Parent Scope</th>
+                    <th>Area (Acres)</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="jurisdiction-tree-body">
+                  <tr><td colspan="7" class="text-center py-4">Loading administrative hierarchy...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         <!-- TAB: GENERIC TABLE VIEW (Parcels, Encroachments, RS Plots, CS Plots) -->
         <section id="tab-table-view" class="tab-pane">
           <div class="pane-header">
@@ -459,8 +526,39 @@
                   </div>
                 </div>
 
+                <!-- SCOPED JURISDICTION (For Plot Boundary and Tabular scoping) -->
+                <div class="form-row mt-3" id="uploader-hierarchy-scope">
+                  <div class="form-group flex-1">
+                    <label for="upload-scope-division">Target Division</label>
+                    <select id="upload-scope-division" class="form-select">
+                      <option value="Biodiversity Conservation Division">Biodiversity Conservation Division</option>
+                    </select>
+                  </div>
+                  <div class="form-group flex-1">
+                    <label for="upload-scope-range">Target Range</label>
+                    <select id="upload-scope-range" class="form-select">
+                      <option value="">-- Select Range (Optional) --</option>
+                      <option value="National Park Range">National Park Range</option>
+                      <option value="Bhawal Range">Bhawal Range</option>
+                    </select>
+                  </div>
+                  <div class="form-group flex-1">
+                    <label for="upload-scope-beat">Target Beat</label>
+                    <select id="upload-scope-beat" class="form-select">
+                      <option value="">-- Select Beat (Optional) --</option>
+                      <option value="Park Beat">Park Beat</option>
+                      <option value="Bankhoira Beat">Bankhoira Beat</option>
+                      <option value="Baupara Beat">Baupara Beat</option>
+                      <option value="BK Bari Beat">BK Bari Beat</option>
+                      <option value="Rajendrapur West Beat">Rajendrapur West Beat</option>
+                      <option value="Baruipara Beat">Baruipara Beat</option>
+                      <option value="Bhabanipur Beat">Bhabanipur Beat</option>
+                    </select>
+                  </div>
+                </div>
+
                 <!-- DROPZONE -->
-                <div id="dropzone" class="dropzone">
+                <div id="dropzone" class="dropzone mt-3">
                   <div class="dropzone-icon">📁</div>
                   <div class="dropzone-text">
                     <strong>Click to select a file</strong> or drag & drop here
@@ -581,6 +679,43 @@
           </div>
         </section>
 
+        <!-- TAB: USER MANAGEMENT (Pillar 4) -->
+        <section id="tab-users" class="tab-pane">
+          <div class="pane-header">
+            <div>
+              <h1 class="pane-title">User Management & Access Control</h1>
+              <p class="pane-subtitle">Manage administrative, range officer, and field beat accounts with Role-Based Access Control (RBAC)</p>
+            </div>
+            <div class="pane-actions">
+              <button class="btn btn-primary btn-sm" id="btn-add-user">
+                <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M15 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm-9-2V7H4v3H1v2h3v3h2v-3h3v-2H6zm9 4c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/></svg>
+                <span>Add New User</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="card table-card">
+            <div class="table-responsive">
+              <table class="admin-table" id="users-table">
+                <thead>
+                  <tr>
+                    <th>User</th>
+                    <th>Role & Title</th>
+                    <th>Division Scope</th>
+                    <th>Assigned Jurisdiction</th>
+                    <th>Permissions</th>
+                    <th>Status</th>
+                    <th class="text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="users-table-body">
+                  <tr><td colspan="7" class="text-center py-4">Loading user accounts...</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
       </main>
     </div>
   </div>
@@ -622,6 +757,212 @@
         <button type="button" class="btn btn-outline" id="delete-cancel-btn">Cancel</button>
         <button type="button" class="btn btn-danger" id="delete-confirm-btn">Delete Record</button>
       </div>
+    </div>
+  </div>
+
+  <!-- JURISDICTION ADD / EDIT MODAL -->
+  <div id="jurisdiction-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog record-dialog">
+      <div class="modal-header">
+        <div class="modal-header-title-group">
+          <span class="modal-badge-dot"></span>
+          <h3 class="modal-title" id="jurisdiction-modal-title">Add Jurisdiction Unit</h3>
+        </div>
+        <button class="modal-close-btn" id="jurisdiction-modal-close-btn">&times;</button>
+      </div>
+      <form id="jurisdiction-form">
+        <input type="hidden" id="jurisdiction-unit-level" value="division">
+        <input type="hidden" id="jurisdiction-unit-id" value="">
+        <div class="modal-body dossier-form-body">
+          <div class="form-group" id="jurisdiction-parent-group" style="display: none;">
+            <label for="jurisdiction-parent-select" id="jurisdiction-parent-label">Parent Unit</label>
+            <select id="jurisdiction-parent-select" class="form-select"></select>
+          </div>
+          <div class="form-group">
+            <label for="jurisdiction-name-en">Name (English)</label>
+            <input type="text" id="jurisdiction-name-en" class="form-input" placeholder="e.g. Bhawal National Park" required>
+          </div>
+          <div class="form-group">
+            <label for="jurisdiction-name-bn">Name (Bengali)</label>
+            <input type="text" id="jurisdiction-name-bn" class="form-input" placeholder="e.g. ভাওয়াল জাতীয় উদ্যান">
+          </div>
+          <div class="form-group">
+            <label for="jurisdiction-area-acre">Total Area (Acres)</label>
+            <input type="number" step="0.01" id="jurisdiction-area-acre" class="form-input" placeholder="e.g. 24718.00">
+          </div>
+          <div class="form-row" id="jurisdiction-center-coords" style="display: none;">
+            <div class="form-group flex-1">
+              <label for="jurisdiction-center-lat">Center Latitude</label>
+              <input type="number" step="0.000001" id="jurisdiction-center-lat" class="form-input" placeholder="24.085000">
+            </div>
+            <div class="form-group flex-1">
+              <label for="jurisdiction-center-lng">Center Longitude</label>
+              <input type="number" step="0.000001" id="jurisdiction-center-lng" class="form-input" placeholder="90.415000">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="jurisdiction-modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="jurisdiction-modal-save-btn">Save Jurisdiction</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- BOUNDARY UPLOAD MODAL -->
+  <div id="boundary-upload-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-md">
+      <div class="modal-header">
+        <div class="modal-header-title-group">
+          <span class="modal-badge-dot"></span>
+          <h3 class="modal-title">Upload Spatial Boundary (GeoJSON)</h3>
+        </div>
+        <button class="modal-close-btn" id="boundary-upload-close-btn">&times;</button>
+      </div>
+      <form id="boundary-upload-form">
+        <div class="modal-body dossier-form-body">
+          <div class="form-group">
+            <label for="boundary-upload-level">Administrative Level</label>
+            <select id="boundary-upload-level" class="form-select" required>
+              <option value="division">Division Boundary</option>
+              <option value="range">Range Boundary</option>
+              <option value="beat">Beat Boundary</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="boundary-upload-unit-name">Jurisdiction Unit Name</label>
+            <input type="text" id="boundary-upload-unit-name" class="form-input" placeholder="e.g. Park Beat or Bhawal Range" required>
+          </div>
+          <div class="form-group">
+            <label for="boundary-file-input">Boundary GeoJSON File (.geojson, .json)</label>
+            <input type="file" id="boundary-file-input" class="form-input" accept=".geojson,.json" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="boundary-upload-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="boundary-upload-submit-btn">Upload & Save Boundary</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- JURISDICTION MOVE MODAL -->
+  <div id="move-jurisdiction-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog modal-sm">
+      <div class="modal-header">
+        <div class="modal-header-title-group">
+          <span class="modal-badge-dot"></span>
+          <h3 class="modal-title" id="move-modal-title">Move Administrative Unit</h3>
+        </div>
+        <button class="modal-close-btn" id="move-modal-close-btn">&times;</button>
+      </div>
+      <form id="move-jurisdiction-form">
+        <input type="hidden" id="move-unit-level" value="beat">
+        <input type="hidden" id="move-unit-id" value="">
+        <input type="hidden" id="move-unit-name" value="">
+        <div class="modal-body">
+          <p class="text-sm text-muted mb-3" id="move-modal-desc">Select the new parent jurisdiction:</p>
+          <div class="form-group">
+            <label for="move-parent-select" id="move-parent-label">New Parent Range</label>
+            <select id="move-parent-select" class="form-select" required></select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="move-modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="move-modal-submit-btn">Confirm Move</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- USER MANAGEMENT MODAL -->
+  <div id="user-modal" class="modal-backdrop" style="display: none;">
+    <div class="modal-dialog record-dialog">
+      <div class="modal-header">
+        <div class="modal-header-title-group">
+          <span class="modal-badge-dot"></span>
+          <h3 class="modal-title" id="user-modal-title">Add User</h3>
+        </div>
+        <button class="modal-close-btn" id="user-modal-close-btn">&times;</button>
+      </div>
+      <form id="user-form">
+        <input type="hidden" id="user-edit-id" value="">
+        <div class="modal-body dossier-form-body">
+          <div class="form-group">
+            <label for="user-username">Username</label>
+            <input type="text" id="user-username" class="form-input" placeholder="e.g. ro_gazipur" required autocomplete="username">
+          </div>
+          <div class="form-group">
+            <label for="user-password" id="user-password-label">Password</label>
+            <input type="password" id="user-password" class="form-input" placeholder="Enter secure password" autocomplete="new-password">
+            <small class="text-muted" id="user-password-help" style="display: none;">Leave blank to keep current password</small>
+          </div>
+          <div class="form-group">
+            <label for="user-fullname">Full Name</label>
+            <input type="text" id="user-fullname" class="form-input" placeholder="e.g. Md. Shahidul Islam" required>
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="user-role">Role</label>
+              <select id="user-role" class="form-select" required>
+                <option value="admin">Administrator / DFO</option>
+                <option value="range_officer">Range Officer (RO)</option>
+                <option value="beat_officer">Beat Officer (BO)</option>
+                <option value="viewer">Public Viewer / Guest</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="user-role-title">Designation / Role Title</label>
+              <input type="text" id="user-role-title" class="form-input" placeholder="e.g. Range Officer">
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="user-division">Forest Division</label>
+            <input type="text" id="user-division" class="form-input" value="Biodiversity Conservation Division">
+          </div>
+          <div class="form-row">
+            <div class="form-group flex-1">
+              <label for="user-assigned-range">Assigned Range</label>
+              <select id="user-assigned-range" class="form-select">
+                <option value="">-- None (All Ranges) --</option>
+                <option value="National Park Range">National Park Range</option>
+                <option value="Bhawal Range">Bhawal Range</option>
+              </select>
+            </div>
+            <div class="form-group flex-1">
+              <label for="user-assigned-beat">Assigned Beat</label>
+              <select id="user-assigned-beat" class="form-select">
+                <option value="">-- None (All Beats) --</option>
+                <option value="Park Beat">Park Beat</option>
+                <option value="Bankhoira Beat">Bankhoira Beat</option>
+                <option value="Baupara Beat">Baupara Beat</option>
+                <option value="BK Bari Beat">BK Bari Beat</option>
+                <option value="Rajendrapur West Beat">Rajendrapur West Beat</option>
+                <option value="Baruipara Beat">Baruipara Beat</option>
+                <option value="Bhabanipur Beat">Bhabanipur Beat</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group mt-2">
+            <label>Permissions & Status</label>
+            <div style="display: flex; gap: 16px; margin-top: 6px;">
+              <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+                <input type="checkbox" id="user-can-upload"> Can Ingest / Upload
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+                <input type="checkbox" id="user-can-edit" checked> Can Edit Records
+              </label>
+              <label style="display: flex; align-items: center; gap: 6px; font-weight: normal; cursor: pointer;">
+                <input type="checkbox" id="user-is-active" checked> Account Active
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-outline btn-sm" id="user-modal-cancel-btn">Cancel</button>
+          <button type="submit" class="btn btn-primary btn-sm" id="user-modal-save-btn">Save User</button>
+        </div>
+      </form>
     </div>
   </div>
 
